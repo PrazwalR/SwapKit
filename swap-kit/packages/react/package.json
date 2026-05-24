@@ -1,0 +1,39 @@
+{
+  "name": "@swap-kit/react",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "@tanstack/react-query": ">=5",
+    "viem": ">=2",
+    "wagmi": ">=2"
+  },
+  "dependencies": {
+    "@swap-kit/core": "workspace:*"
+  },
+  "devDependencies": {
+    "react": "^19.2.0",
+    "@tanstack/react-query": "^5.0.0",
+    "@types/react": "^19.2.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.2",
+    "viem": "^2.50.4",
+    "wagmi": "^2.15.0"
+  }
+}

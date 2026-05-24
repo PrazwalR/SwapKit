@@ -1,0 +1,46 @@
+{
+  "name": "@swap-kit/core",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "DeFi Intent SDK — unified swap routing across Uniswap V4, 1inch Fusion+, and Paraswap with MEV protection",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"No tests yet\" && exit 0"
+  },
+  "keywords": [
+    "defi",
+    "swap",
+    "uniswap",
+    "1inch",
+    "paraswap",
+    "mev",
+    "intent"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@1inch/cross-chain-sdk": "^2.1.2",
+    "viem": "^2.50.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.2"
+  }
+}
