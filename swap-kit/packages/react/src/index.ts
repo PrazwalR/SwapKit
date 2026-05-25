@@ -1,22 +1,23 @@
-// ─── Context / Provider ──────────────────────────────────────────────────────
+// ─── Context & Provider ───────────────────────────────────────────────────────
 export { SwapKitProvider, useSwapKit } from "./context/SwapKitProvider.js";
 export type { SwapKitProviderProps } from "./context/SwapKitProvider.js";
 
-// ─── Hooks ───────────────────────────────────────────────────────────────────
+// ─── Hooks ────────────────────────────────────────────────────────────────────
 export { useQuote } from "./hooks/useQuote.js";
-export { useSwap } from "./hooks/useSwap.js";
-export type { SwapStatus, UseSwapReturn } from "./hooks/useSwap.js";
-export { useMEVRisk } from "./hooks/useMEVRisk.js";
+export type { UseQuoteResult, UseQuoteOptions } from "./hooks/useQuote.js";
 
-// ─── Re-exported core types for convenience ──────────────────────────────────
+export { useSwap } from "./hooks/useSwap.js";
+export type { UseSwapResult, SwapStatus } from "./hooks/useSwap.js";
+
+export { useMEVRisk } from "./hooks/useMEVRisk.js";
+export type { UseMEVRiskResult, UseMEVRiskOptions } from "./hooks/useMEVRisk.js";
+
+// ─── Re-exported types from core (convenience) ───────────────────────────────
 export type {
-  SwapKitConfig,
   SwapIntent,
   QuoteResult,
   SwapResult,
   MEVReport,
   SwapProtocol,
-  PoolKey,
+  SwapKitConfig,
 } from "@swap-kit/core";
-
-export { SwapKit, MEVGuard, normalizeIntent, SwapIntentSchema } from "@swap-kit/core";

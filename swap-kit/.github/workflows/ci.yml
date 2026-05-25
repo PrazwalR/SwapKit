@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  typescript:
+    name: TypeScript Build & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+          cache-dependency-path: swap-kit/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: swap-kit
+        run: pnpm install --frozen-lockfile
+
+      - name: Build all packages
+        working-directory: swap-kit
+        run: pnpm build
+
+      - name: Type check
+        working-directory: swap-kit
+        run: pnpm check-types
+
+      - name: Lint
+        working-directory: swap-kit
+        run: pnpm lint
+
+  rust:
+    name: Rust Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: swap-kit
+
+      - name: Build
+        working-directory: swap-kit
+        run: cargo build --workspace
+
+      - name: Test
+        working-directory: swap-kit
+        run: cargo test --workspace
+
+      - name: Clippy
+        working-directory: swap-kit
+        run: cargo clippy --workspace -- -D warnings

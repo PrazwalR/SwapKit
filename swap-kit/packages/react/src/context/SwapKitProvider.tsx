@@ -1,54 +1,60 @@
+"use client";
+
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { SwapKit, type SwapKitConfig } from "@swap-kit/core";
 
-/**
- * Internal context that holds the SwapKit SDK instance.
- * Consumers access it via the `useSwapKit()` hook.
- */
+// ─── Context ──────────────────────────────────────────────────────────────────
+
 const SwapKitContext = createContext<SwapKit | null>(null);
 
+// ─── Provider ─────────────────────────────────────────────────────────────────
+
 export interface SwapKitProviderProps {
-  /** Configuration forwarded to the SwapKit constructor. */
+  /** SwapKit configuration (API keys, engine URL, etc.) */
   config: SwapKitConfig;
   children: ReactNode;
 }
 
 /**
- * Provides a shared `SwapKit` instance to the React tree.
+ * Provides a SwapKit instance to all child components.
+ * Wrap your app (or swap-related subtree) with this provider.
  *
+ * @example
  * ```tsx
- * <SwapKitProvider config={{ oneInchApiKey: "…" }}>
- *   <App />
+ * <SwapKitProvider config={{ oneInchApiKey: "your-key" }}>
+ *   <SwapWidget />
  * </SwapKitProvider>
  * ```
  */
 export function SwapKitProvider({ config, children }: SwapKitProviderProps) {
-  const swapKit = useMemo(
-    () => new SwapKit(config),
-    // Re-create instance only when the config identity changes.
-    // Consumers should pass a stable config object or memoise it.
-    [config],
-  );
+  const sdk = useMemo(() => new SwapKit(config), [
+    config.oneInchApiKey,
+    config.rustEngineUrl,
+    config.mevFailOpen,
+  ]);
 
   return (
-    <SwapKitContext.Provider value={swapKit}>
+    <SwapKitContext.Provider value={sdk}>
       {children}
     </SwapKitContext.Provider>
   );
 }
 
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
 /**
- * Returns the `SwapKit` instance provided by the nearest `<SwapKitProvider>`.
+ * Access the SwapKit instance from context.
+ * Must be used within a `<SwapKitProvider>`.
  *
- * @throws if called outside a `<SwapKitProvider>`.
+ * @throws If used outside of SwapKitProvider
  */
 export function useSwapKit(): SwapKit {
-  const ctx = useContext(SwapKitContext);
-  if (!ctx) {
+  const sdk = useContext(SwapKitContext);
+  if (!sdk) {
     throw new Error(
-      "useSwapKit() must be used within a <SwapKitProvider>. " +
-        "Wrap your component tree with <SwapKitProvider config={…}>.",
+      "useSwapKit must be used within a <SwapKitProvider>. " +
+      "Wrap your component tree with <SwapKitProvider config={...}>."
     );
   }
-  return ctx;
+  return sdk;
 }

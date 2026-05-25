@@ -1,235 +1,215 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {IERC20} from "./interfaces/IERC20.sol";
-
 /**
  * @title SwapKitRouter
- * @notice Aggregation router that dispatches swap calls to whitelisted DEX routers.
- *         Supports single-hop and multi-hop (chained) swaps.
+ * @notice On-chain swap aggregator that routes through whitelisted DEX routers.
+ * @dev Supports single-hop and multi-hop swaps via approved router contracts.
+ *
+ * This contract acts as a unified entry point for swaps across multiple DEXs.
+ * Only routers explicitly whitelisted by the owner can be called.
  */
 contract SwapKitRouter {
-    // ─── Types ───────────────────────────────────────────────────────────────────
+    // ─── State ────────────────────────────────────────────────────────────────
+
+    address public owner;
+    mapping(address => bool) public whitelistedRouters;
+
+    // ─── Structs ──────────────────────────────────────────────────────────────
 
     struct SwapStep {
         address tokenIn;
         address tokenOut;
         address router;
-        bytes data; // calldata to forward to the DEX router
+        uint256 amountIn;
+        bytes routerCalldata;
     }
 
-    // ─── State ───────────────────────────────────────────────────────────────────
-
-    address public owner;
-
-    /// @notice Only routers in this set may be called.
-    mapping(address => bool) public whitelistedRouters;
-
-    // ─── Events ──────────────────────────────────────────────────────────────────
+    // ─── Events ───────────────────────────────────────────────────────────────
 
     event SwapExecuted(
-        address indexed sender,
+        address indexed user,
         address indexed tokenIn,
         address indexed tokenOut,
         uint256 amountIn,
-        uint256 amountOut
+        uint256 amountOut,
+        address router
     );
 
-    event RouterWhitelisted(address indexed router, bool allowed);
+    event RouterWhitelisted(address indexed router, bool status);
+    event EmergencyWithdraw(address indexed token, uint256 amount);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
-    event EmergencyWithdraw(address indexed token, uint256 amount, address indexed to);
+    // ─── Errors ───────────────────────────────────────────────────────────────
 
-    // ─── Errors ──────────────────────────────────────────────────────────────────
-
-    error OnlyOwner();
+    error NotOwner();
     error RouterNotWhitelisted(address router);
-    error InsufficientOutput(uint256 actual, uint256 minRequired);
-    error SwapCallFailed(address router);
+    error InsufficientOutput(uint256 received, uint256 minimum);
+    error SwapFailed();
     error ZeroAddress();
+    error TransferFailed();
 
-    // ─── Modifiers ───────────────────────────────────────────────────────────────
+    // ─── Modifiers ────────────────────────────────────────────────────────────
 
     modifier onlyOwner() {
-        if (msg.sender != owner) revert OnlyOwner();
+        if (msg.sender != owner) revert NotOwner();
         _;
     }
 
-    // ─── Constructor ─────────────────────────────────────────────────────────────
+    // ─── Constructor ──────────────────────────────────────────────────────────
 
     constructor() {
         owner = msg.sender;
     }
 
-    // ─── Core: single-hop swap ───────────────────────────────────────────────────
+    // ─── External Functions ───────────────────────────────────────────────────
 
     /**
-     * @notice Execute a single-hop swap through a whitelisted DEX router.
-     * @param tokenIn     Address of the input token (address(0) for native ETH).
-     * @param tokenOut    Address of the output token.
-     * @param amountIn    Amount of `tokenIn` to sell.
-     * @param minAmountOut Minimum acceptable output — reverts if not met.
-     * @param routeData   ABI-encoded call forwarded to the DEX router.
-     *                    The first 20 bytes encode the target router address;
-     *                    the remainder is the router's calldata.
-     * @return amountOut  Actual amount of `tokenOut` received.
+     * @notice Execute a single-hop swap through a whitelisted router.
+     * @param tokenIn Token to sell
+     * @param tokenOut Token to receive
+     * @param amountIn Amount of tokenIn to sell
+     * @param minAmountOut Minimum acceptable output (slippage protection)
+     * @param router DEX router to execute through
+     * @param routerCalldata Pre-encoded calldata for the router
+     * @return amountOut Actual amount received
      */
     function swap(
         address tokenIn,
         address tokenOut,
         uint256 amountIn,
         uint256 minAmountOut,
-        bytes calldata routeData
+        address router,
+        bytes calldata routerCalldata
     ) external payable returns (uint256 amountOut) {
-        // Decode target router from routeData
-        address router = address(bytes20(routeData[:20]));
-        bytes calldata routerCalldata = routeData[20:];
-
         if (!whitelistedRouters[router]) revert RouterNotWhitelisted(router);
 
-        // Pull ERC-20 tokens from sender (skip for native ETH)
-        if (tokenIn != address(0)) {
-            IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn);
-            IERC20(tokenIn).approve(router, amountIn);
+        // Transfer tokens from user (for ERC-20, not ETH)
+        if (tokenIn != address(0) && tokenIn != 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE) {
+            _safeTransferFrom(tokenIn, msg.sender, address(this), amountIn);
+            _safeApprove(tokenIn, router, amountIn);
         }
 
-        uint256 balBefore = _balanceOf(tokenOut, address(this));
+        // Get balance before swap
+        uint256 balanceBefore = _getBalance(tokenOut, address(this));
 
-        // Forward call to the DEX router
-        (bool success,) = router.call{value: tokenIn == address(0) ? msg.value : 0}(routerCalldata);
-        if (!success) revert SwapCallFailed(router);
+        // Execute swap through router
+        (bool success,) = router.call{value: msg.value}(routerCalldata);
+        if (!success) revert SwapFailed();
 
-        uint256 balAfter = _balanceOf(tokenOut, address(this));
-        amountOut = balAfter - balBefore;
+        // Calculate output
+        uint256 balanceAfter = _getBalance(tokenOut, address(this));
+        amountOut = balanceAfter - balanceBefore;
 
         if (amountOut < minAmountOut) revert InsufficientOutput(amountOut, minAmountOut);
 
-        // Transfer output to the caller
-        _transfer(tokenOut, msg.sender, amountOut);
+        // Transfer output to user
+        if (tokenOut == address(0) || tokenOut == 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE) {
+            (bool sent,) = msg.sender.call{value: amountOut}("");
+            if (!sent) revert TransferFailed();
+        } else {
+            _safeTransfer(tokenOut, msg.sender, amountOut);
+        }
 
-        emit SwapExecuted(msg.sender, tokenIn, tokenOut, amountIn, amountOut);
+        emit SwapExecuted(msg.sender, tokenIn, tokenOut, amountIn, amountOut, router);
     }
 
-    // ─── Core: multi-hop swap ────────────────────────────────────────────────────
-
     /**
-     * @notice Execute a multi-hop swap by chaining several `SwapStep`s.
-     *         The output of each step becomes the input of the next.
-     * @param steps Ordered array of swap steps.
-     * @return finalAmountOut Amount of the final output token received.
+     * @notice Execute a multi-hop swap through multiple routers.
+     * @param steps Array of swap steps to execute in sequence
+     * @param minFinalAmountOut Minimum acceptable final output
+     * @return finalAmountOut Actual final amount received
      */
-    function multiSwap(SwapStep[] calldata steps) external payable returns (uint256 finalAmountOut) {
-        uint256 currentAmount;
-
+    function multiSwap(
+        SwapStep[] calldata steps,
+        uint256 minFinalAmountOut
+    ) external payable returns (uint256 finalAmountOut) {
         for (uint256 i = 0; i < steps.length; i++) {
             SwapStep calldata step = steps[i];
-
             if (!whitelistedRouters[step.router]) revert RouterNotWhitelisted(step.router);
 
-            // For the first step, pull tokens from the sender
-            if (i == 0) {
-                if (step.tokenIn != address(0)) {
-                    IERC20(step.tokenIn).transferFrom(msg.sender, address(this), _inputAmount(step));
-                    IERC20(step.tokenIn).approve(step.router, _inputAmount(step));
-                }
-                currentAmount = _inputAmount(step);
-            } else {
-                // Approve the next router to spend what we received
-                if (step.tokenIn != address(0)) {
-                    IERC20(step.tokenIn).approve(step.router, currentAmount);
-                }
+            if (i == 0 && step.tokenIn != address(0)) {
+                _safeTransferFrom(step.tokenIn, msg.sender, address(this), step.amountIn);
             }
 
-            uint256 balBefore = _balanceOf(step.tokenOut, address(this));
+            _safeApprove(step.tokenIn, step.router, step.amountIn);
 
-            (bool success,) = step.router.call{
-                value: (i == 0 && step.tokenIn == address(0)) ? msg.value : 0
-            }(step.data);
-            if (!success) revert SwapCallFailed(step.router);
+            uint256 balanceBefore = _getBalance(step.tokenOut, address(this));
 
-            uint256 balAfter = _balanceOf(step.tokenOut, address(this));
-            currentAmount = balAfter - balBefore;
+            (bool success,) = step.router.call{value: i == 0 ? msg.value : 0}(step.routerCalldata);
+            if (!success) revert SwapFailed();
+
+            finalAmountOut = _getBalance(step.tokenOut, address(this)) - balanceBefore;
         }
 
-        finalAmountOut = currentAmount;
+        if (finalAmountOut < minFinalAmountOut) {
+            revert InsufficientOutput(finalAmountOut, minFinalAmountOut);
+        }
 
-        // Transfer the final output to the caller
+        // Transfer final output to user
         SwapStep calldata lastStep = steps[steps.length - 1];
-        _transfer(lastStep.tokenOut, msg.sender, finalAmountOut);
-
-        emit SwapExecuted(
-            msg.sender,
-            steps[0].tokenIn,
-            lastStep.tokenOut,
-            _inputAmount(steps[0]),
-            finalAmountOut
-        );
+        _safeTransfer(lastStep.tokenOut, msg.sender, finalAmountOut);
     }
 
-    // ─── Admin ───────────────────────────────────────────────────────────────────
+    // ─── Admin Functions ──────────────────────────────────────────────────────
 
-    /**
-     * @notice Whitelist or de-whitelist a DEX router address.
-     */
-    function setRouterWhitelist(address router, bool allowed) external onlyOwner {
+    function setRouterWhitelist(address router, bool status) external onlyOwner {
         if (router == address(0)) revert ZeroAddress();
-        whitelistedRouters[router] = allowed;
-        emit RouterWhitelisted(router, allowed);
+        whitelistedRouters[router] = status;
+        emit RouterWhitelisted(router, status);
     }
 
-    /**
-     * @notice Emergency withdrawal of any token (or native ETH) stuck in this contract.
-     * @param token The token address (address(0) for native ETH).
-     * @param to    Recipient.
-     */
-    function emergencyWithdraw(address token, address to) external onlyOwner {
-        if (to == address(0)) revert ZeroAddress();
-
-        uint256 amount;
-        if (token == address(0)) {
-            amount = address(this).balance;
-            (bool ok,) = to.call{value: amount}("");
-            require(ok, "ETH transfer failed");
-        } else {
-            amount = IERC20(token).balanceOf(address(this));
-            IERC20(token).transfer(to, amount);
-        }
-
-        emit EmergencyWithdraw(token, amount, to);
-    }
-
-    /**
-     * @notice Transfer ownership.
-     */
     function transferOwnership(address newOwner) external onlyOwner {
         if (newOwner == address(0)) revert ZeroAddress();
+        emit OwnershipTransferred(owner, newOwner);
         owner = newOwner;
     }
 
-    // ─── Receive ETH ─────────────────────────────────────────────────────────────
+    function emergencyWithdraw(address token, uint256 amount) external onlyOwner {
+        if (token == address(0) || token == 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE) {
+            (bool sent,) = owner.call{value: amount}("");
+            if (!sent) revert TransferFailed();
+        } else {
+            _safeTransfer(token, owner, amount);
+        }
+        emit EmergencyWithdraw(token, amount);
+    }
+
+    // ─── Receive ETH ──────────────────────────────────────────────────────────
 
     receive() external payable {}
 
-    // ─── Internals ───────────────────────────────────────────────────────────────
+    // ─── Internal Helpers ─────────────────────────────────────────────────────
 
-    function _balanceOf(address token, address account) internal view returns (uint256) {
-        if (token == address(0)) return account.balance;
-        return IERC20(token).balanceOf(account);
-    }
-
-    function _transfer(address token, address to, uint256 amount) internal {
-        if (token == address(0)) {
-            (bool ok,) = to.call{value: amount}("");
-            require(ok, "ETH transfer failed");
-        } else {
-            IERC20(token).transfer(to, amount);
+    function _getBalance(address token, address account) internal view returns (uint256) {
+        if (token == address(0) || token == 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE) {
+            return account.balance;
         }
+        (bool success, bytes memory data) = token.staticcall(
+            abi.encodeWithSelector(0x70a08231, account) // balanceOf(address)
+        );
+        if (!success || data.length < 32) return 0;
+        return abi.decode(data, (uint256));
     }
 
-    /**
-     * @dev Extracts the input amount from the step's calldata.
-     *      For simplicity, we ABI-decode the first uint256 parameter.
-     */
-    function _inputAmount(SwapStep calldata step) internal pure returns (uint256) {
-        return abi.decode(step.data[:32], (uint256));
+    function _safeTransfer(address token, address to, uint256 amount) internal {
+        (bool success, bytes memory data) = token.call(
+            abi.encodeWithSelector(0xa9059cbb, to, amount) // transfer(address,uint256)
+        );
+        if (!success || (data.length > 0 && !abi.decode(data, (bool)))) revert TransferFailed();
+    }
+
+    function _safeTransferFrom(address token, address from, address to, uint256 amount) internal {
+        (bool success, bytes memory data) = token.call(
+            abi.encodeWithSelector(0x23b872dd, from, to, amount) // transferFrom(address,address,uint256)
+        );
+        if (!success || (data.length > 0 && !abi.decode(data, (bool)))) revert TransferFailed();
+    }
+
+    function _safeApprove(address token, address spender, uint256 amount) internal {
+        (bool success,) = token.call(
+            abi.encodeWithSelector(0x095ea7b3, spender, amount) // approve(address,uint256)
+        );
+        // Don't revert on failed approve — some tokens don't return bool
     }
 }

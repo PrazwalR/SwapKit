@@ -2,6 +2,7 @@
   "name": "@swap-kit/react",
   "version": "0.1.0",
   "type": "module",
+  "description": "React hooks for swap-kit — useQuote, useSwap, useMEVRisk with wagmi integration",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -28,9 +29,9 @@
     "@swap-kit/core": "workspace:*"
   },
   "devDependencies": {
+    "@types/react": "^19.2.0",
     "react": "^19.2.0",
     "@tanstack/react-query": "^5.0.0",
-    "@types/react": "^19.2.0",
     "tsup": "^8.5.1",
     "typescript": "^5.9.2",
     "viem": "^2.50.4",

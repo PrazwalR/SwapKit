@@ -1,114 +1,129 @@
+"use client";
+
 import { useCallback, useState } from "react";
 import { useWalletClient, usePublicClient } from "wagmi";
-import type { SwapIntent, QuoteResult } from "@swap-kit/core";
-import type { Hex } from "viem";
+import type { SwapIntent, QuoteResult, SwapResult } from "@swap-kit/core";
 import { useSwapKit } from "../context/SwapKitProvider.js";
+import { useQuote, type UseQuoteOptions } from "./useQuote.js";
 
-/** Possible states of the swap state machine. */
+// ─── State Machine ────────────────────────────────────────────────────────────
+
 export type SwapStatus =
-  | "idle"
-  | "quoting"
-  | "approving"
-  | "swapping"
-  | "success"
-  | "error";
+  | "idle"       // No swap in progress
+  | "quoting"    // Fetching quotes
+  | "approving"  // Waiting for token approval tx
+  | "swapping"   // Swap tx submitted, waiting for confirmation
+  | "success"    // Swap completed successfully
+  | "error";     // Swap failed
 
-export interface UseSwapReturn {
-  /** Current state-machine status. */
+export interface UseSwapResult {
+  /** Current state of the swap process */
   status: SwapStatus;
-  /** Quotes fetched during the `quoting` phase. */
+  /** All fetched quotes (auto-refreshing) */
   quotes: QuoteResult[] | undefined;
-  /** Best quote (first element after sorting). */
+  /** The best available quote */
   bestQuote: QuoteResult | undefined;
-  /** Transaction hash once the swap is submitted. */
-  txHash: Hex | undefined;
-  /** Error encountered during any phase, or `undefined`. */
-  error: Error | undefined;
-  /** Kick off the full swap flow: quote → approve → swap. */
-  swap: (intent: SwapIntent) => Promise<void>;
-  /** Reset the hook back to idle state. */
+  /** Whether quotes are loading */
+  isQuoting: boolean;
+  /** Transaction hash once submitted */
+  txHash: string | undefined;
+  /** Full swap result on success */
+  result: SwapResult | undefined;
+  /** Error details if status is "error" */
+  error: Error | null;
+  /** Execute the swap with the best available quote */
+  swap: () => Promise<void>;
+  /** Reset the state machine back to idle */
   reset: () => void;
 }
 
 /**
- * Full swap state machine hook.
- *
- * Transitions: idle → quoting → approving → swapping → success
- *                                                    ↘ error
- *
- * Uses wagmi's `useWalletClient` / `usePublicClient` for chain interaction
- * and the `SwapKit` instance from context for quote & execution.
+ * Full swap lifecycle hook with state machine.
+ * Handles quoting, approval, execution, and error states.
  *
  * @example
  * ```tsx
- * const { status, bestQuote, txHash, error, swap, reset } = useSwap();
- * // …
- * <button onClick={() => swap(intent)} disabled={status !== "idle"}>Swap</button>
+ * const { bestQuote, status, swap, error, txHash } = useSwap({
+ *   fromToken: "ETH",
+ *   toToken: "USDC",
+ *   fromAmount: parseEther("1"),
+ *   fromChainId: 1,
+ * });
+ *
+ * return (
+ *   <button onClick={swap} disabled={status !== "idle" || !bestQuote}>
+ *     {status === "swapping" ? "Swapping..." : `Swap for ${bestQuote?.amountOut}`}
+ *   </button>
+ * );
  * ```
  */
-export function useSwap(): UseSwapReturn {
-  const swapKit = useSwapKit();
+export function useSwap(
+  intent: SwapIntent | undefined,
+  quoteOptions?: UseQuoteOptions
+): UseSwapResult {
+  const sdk = useSwapKit();
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient();
 
   const [status, setStatus] = useState<SwapStatus>("idle");
-  const [quotes, setQuotes] = useState<QuoteResult[] | undefined>(undefined);
-  const [txHash, setTxHash] = useState<Hex | undefined>(undefined);
-  const [error, setError] = useState<Error | undefined>(undefined);
+  const [txHash, setTxHash] = useState<string | undefined>();
+  const [result, setResult] = useState<SwapResult | undefined>();
+  const [error, setError] = useState<Error | null>(null);
+
+  // Auto-refreshing quotes
+  const {
+    quotes,
+    bestQuote,
+    isLoading: isQuoting,
+  } = useQuote(intent, {
+    ...quoteOptions,
+    // Pause quote refreshing during swap execution
+    enabled: intent !== undefined && status === "idle",
+  });
+
+  const swap = useCallback(async () => {
+    if (!intent || !walletClient || !publicClient) {
+      setError(new Error("Wallet not connected or intent not provided"));
+      setStatus("error");
+      return;
+    }
+
+    try {
+      setStatus("approving");
+      setError(null);
+      setTxHash(undefined);
+      setResult(undefined);
+
+      setStatus("swapping");
+
+      const swapResult = await sdk.swap(intent, walletClient, publicClient);
+
+      setTxHash(swapResult.txHash);
+      setResult(swapResult);
+      setStatus("success");
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      setError(error);
+      setStatus("error");
+    }
+  }, [intent, walletClient, publicClient, sdk]);
 
   const reset = useCallback(() => {
     setStatus("idle");
-    setQuotes(undefined);
     setTxHash(undefined);
-    setError(undefined);
+    setResult(undefined);
+    setError(null);
   }, []);
 
-  const swap = useCallback(
-    async (intent: SwapIntent) => {
-      if (!walletClient) {
-        setError(new Error("Wallet not connected. Please connect your wallet first."));
-        setStatus("error");
-        return;
-      }
-
-      if (!publicClient) {
-        setError(new Error("Public client unavailable. Check your wagmi provider config."));
-        setStatus("error");
-        return;
-      }
-
-      try {
-        // ── 1. Quote ──────────────────────────────────────────────────
-        setStatus("quoting");
-        setError(undefined);
-
-        const fetchedQuotes = await swapKit.quote(intent);
-        setQuotes(fetchedQuotes);
-
-        if (fetchedQuotes.length === 0) {
-          throw new Error("No quotes available for this swap.");
-        }
-
-        // ── 2. Approve (placeholder — real approval logic lives in core) ──
-        setStatus("approving");
-
-        // ── 3. Swap ───────────────────────────────────────────────────
-        setStatus("swapping");
-
-        const result = await swapKit.swap(intent, walletClient, publicClient);
-        setTxHash(result.txHash);
-        setStatus("success");
-      } catch (err) {
-        const wrapped =
-          err instanceof Error ? err : new Error(String(err));
-        setError(wrapped);
-        setStatus("error");
-      }
-    },
-    [swapKit, walletClient, publicClient],
-  );
-
-  const bestQuote = quotes?.[0];
-
-  return { status, quotes, bestQuote, txHash, error, swap, reset };
+  return {
+    status,
+    quotes,
+    bestQuote,
+    isQuoting,
+    txHash,
+    result,
+    error,
+    swap,
+    reset,
+  };
 }

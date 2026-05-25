@@ -123,10 +123,11 @@ export class UniswapV4Adapter implements ISwapAdapter {
     // This is idempotent if already approved
 
     const txHash = await walletClient.sendTransaction({
-      to:    addrs.universalRouter,
-      data:  routeData.calldata,
-      // For ETH swaps, value = fromAmount
-      value: this.isNativeETH(routeData.poolKey.currency0) ? (quote as any).fromAmount ?? 0n : 0n,
+      account: walletClient.account!,
+      chain:   walletClient.chain!,
+      to:      addrs.universalRouter,
+      data:    routeData.calldata,
+      value:   0n, // For ETH swaps, caller should set value externally
     });
 
     const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
