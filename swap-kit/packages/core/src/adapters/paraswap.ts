@@ -112,9 +112,11 @@ export class ParaswapAdapter implements ISwapAdapter {
 
     // Step 2: Submit the transaction
     const txHash = await walletClient.sendTransaction({
-      to:    txData.to as Address,
-      data:  txData.data as Hex,
-      value: BigInt(txData.value || "0"),
+      account: walletClient.account!,
+      chain:   walletClient.chain!,
+      to:      txData.to as Address,
+      data:    txData.data as Hex,
+      value:   BigInt(txData.value || "0"),
     });
 
     // Step 3: Wait for confirmation
