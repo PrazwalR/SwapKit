@@ -1,19 +1,14 @@
-import { SDK, PrivateKeyProviderConnector } from "@1inch/cross-chain-sdk";
 import type { ISwapAdapter } from "./base.js";
 import type { SwapIntent, QuoteResult, SwapResult, OneInchRouteData } from "../types.js";
 import type { WalletClient, PublicClient, Hex } from "viem";
 
 export class OneInchFusionAdapter implements ISwapAdapter {
   readonly protocol = "1inch-fusion" as const;
-  private sdk: SDK;
   private apiKey: string;
+  private baseUrl = "https://api.1inch.dev/fusion-plus";
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
-    this.sdk = new SDK({
-      url: "https://api.1inch.dev/fusion-plus",
-      authKey: apiKey,
-    });
   }
 
   supports(intent: Required<SwapIntent>): boolean {
@@ -25,38 +20,47 @@ export class OneInchFusionAdapter implements ISwapAdapter {
   }
 
   async quote(intent: Required<SwapIntent>): Promise<QuoteResult> {
-    const quoteParams = {
-      srcChainId: intent.fromChainId as any,
-      dstChainId: intent.toChainId as any,
-      srcTokenAddress: intent.fromToken as string,
-      dstTokenAddress: intent.toToken as string,
-      amount: intent.fromAmount.toString(),
-      walletAddress: "0x0000000000000000000000000000000000000001",
-      enableEstimate: true,
-    };
+    const isCrossChain = intent.fromChainId !== intent.toChainId;
+    let url = "";
 
-    const quote = await this.sdk.getQuote(quoteParams).catch((err: any) => {
+    // 1inch has different endpoints for same-chain (Fusion) vs cross-chain (Fusion+)
+    if (isCrossChain) {
+      url = `${this.baseUrl}/quoter/v1.0/quote/receive?srcChain=${intent.fromChainId}&dstChain=${intent.toChainId}&srcTokenAddress=${intent.fromToken}&dstTokenAddress=${intent.toToken}&amount=${intent.fromAmount}&walletAddress=${intent.recipient || "0x0000000000000000000000000000000000000001"}&enableEstimate=true`;
+    } else {
+      url = `https://api.1inch.dev/swap/v6.0/${intent.fromChainId}/quote?src=${intent.fromToken}&dst=${intent.toToken}&amount=${intent.fromAmount}&from=${intent.recipient || "0x0000000000000000000000000000000000000001"}`;
+    }
+
+    try {
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${this.apiKey}` }
+      });
+      
+      if (!res.ok) {
+        throw new Error(`1inch API error: ${await res.text()}`);
+      }
+      
+      const data = await res.json() as any;
+      const amountOut = BigInt(data.dstTokenAmount ?? data.toTokenAmount ?? data.dstAmount ?? "0");
+
+      return {
+        protocol: "1inch-fusion",
+        amountOut,
+        gasCostWei: 0n, // Intent swaps are gasless for the maker
+        mevExposure: 0n, // Protected by resolvers
+        netAmountOut: amountOut,
+        priceImpactBps: 20, // stub
+        routeData: {
+          type: "1inch-fusion",
+          orderHash: "0x" as Hex,
+          order: data,
+          secrets: [],
+        },
+        validUntil: Math.floor(Date.now() / 1000) + 120,
+      };
+    } catch (err: any) {
       console.warn("1inch quote failed:", err.message);
-      return { dstTokenAmount: "0" };
-    });
-    
-    const amountOut = BigInt((quote as any).dstTokenAmount ?? "0");
-
-    return {
-      protocol: "1inch-fusion",
-      amountOut,
-      gasCostWei: 0n,
-      mevExposure: 0n,
-      netAmountOut: amountOut,
-      priceImpactBps: 20, // stub
-      routeData: {
-        type: "1inch-fusion",
-        orderHash: "0x" as Hex,
-        order: {} as any,
-        secrets: [],
-      },
-      validUntil: Math.floor(Date.now() / 1000) + 120,
-    };
+      throw err;
+    }
   }
 
   async execute(
@@ -64,9 +68,11 @@ export class OneInchFusionAdapter implements ISwapAdapter {
     walletClient: WalletClient,
     publicClient: PublicClient
   ): Promise<SwapResult> {
-    const chainId = walletClient.chain!.id;
-
-    // We will build the full 1inch execution logic when testing with real keys
+    // In a real execution, we would:
+    // 1. Sign the order via walletClient.signTypedData
+    // 2. Submit the signed order to the 1inch Relayer API
+    // For now, we mock the execution hash since we're testing integrations.
+    
     const orderHash = "0x0000000000000000000000000000000000000000000000000000000000000000" as Hex;
     
     return {
