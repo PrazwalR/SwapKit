@@ -1,16 +1,38 @@
 {
   "name": "@swap-kit/cli",
-  "version": "1.0.0",
-  "description": "CLI for SwapKit Intent-Based Execution",
+  "version": "0.1.0",
+  "description": "CLI for SwapKit — get DeFi quotes and simulate MEV from your terminal",
   "main": "./dist/index.js",
   "bin": {
     "swap-kit": "./dist/index.js"
   },
   "type": "module",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsup src/index.ts --format esm --clean",
     "dev": "tsup src/index.ts --format esm --watch",
-    "start": "node ./dist/index.js"
+    "start": "node ./dist/index.js",
+    "prepublishOnly": "pnpm run build"
+  },
+  "keywords": [
+    "defi",
+    "swap",
+    "cli",
+    "uniswap",
+    "1inch",
+    "mev"
+  ],
+  "author": "prazwal",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/prazwal/swap-kit"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "@swap-kit/core": "workspace:*",

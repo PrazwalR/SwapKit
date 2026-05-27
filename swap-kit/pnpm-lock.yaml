@@ -125,16 +125,13 @@ importers:
 
   packages/core:
     dependencies:
-      '@1inch/cross-chain-sdk':
-        specifier: ^2.1.2
-        version: 2.1.2(bufferutil@4.1.0)(typescript@5.9.2)(utf-8-validate@6.0.6)
-      viem:
-        specifier: ^2.50.4
-        version: 2.50.4(bufferutil@4.1.0)(typescript@5.9.2)(utf-8-validate@6.0.6)(zod@4.4.3)
       zod:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@1inch/cross-chain-sdk':
+        specifier: ^2.1.2
+        version: 2.1.2(bufferutil@4.1.0)(typescript@5.9.2)(utf-8-validate@6.0.6)
       '@types/node':
         specifier: ^22.15.3
         version: 22.15.3
@@ -144,6 +141,9 @@ importers:
       typescript:
         specifier: ^5.9.2
         version: 5.9.2
+      viem:
+        specifier: ^2.50.4
+        version: 2.50.4(bufferutil@4.1.0)(typescript@5.9.2)(utf-8-validate@6.0.6)(zod@4.4.3)
 
   packages/eslint-config:
     devDependencies:

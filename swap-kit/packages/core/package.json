@@ -2,7 +2,7 @@
   "name": "@swap-kit/core",
   "version": "0.1.0",
   "type": "module",
-  "description": "DeFi Intent SDK — unified swap routing across Uniswap V4, 1inch Fusion+, and Paraswap with MEV protection",
+  "description": "Intent-Based DeFi SDK — unified swap routing across Uniswap V4, 1inch Fusion+, and Paraswap with MEV protection",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -14,33 +14,61 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "test": "echo \"No tests yet\" && exit 0"
+    "test": "npx tsx src/test/integration.ts",
+    "prepublishOnly": "pnpm run build"
   },
   "keywords": [
     "defi",
     "swap",
     "uniswap",
+    "uniswap-v4",
     "1inch",
+    "fusion",
     "paraswap",
     "mev",
-    "intent"
+    "mev-protection",
+    "flashbots",
+    "intent",
+    "dex",
+    "dex-aggregator",
+    "ethereum",
+    "base",
+    "arbitrum",
+    "web3",
+    "viem"
   ],
-  "author": "",
+  "author": "prazwal",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/prazwal/swap-kit"
+  },
+  "homepage": "https://github.com/prazwal/swap-kit#readme",
+  "bugs": {
+    "url": "https://github.com/prazwal/swap-kit/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "viem": ">=2.0.0"
+  },
   "dependencies": {
-    "@1inch/cross-chain-sdk": "^2.1.2",
-    "viem": "^2.50.4",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@1inch/cross-chain-sdk": "^2.1.2",
     "@types/node": "^22.15.3",
     "tsup": "^8.5.1",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "viem": "^2.50.4"
   }
 }
