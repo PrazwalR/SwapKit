@@ -1,4 +1,6 @@
 import {
+  createPublicClient,
+  http,
   encodeFunctionData,
   encodeAbiParameters,
   type Address,
@@ -6,6 +8,7 @@ import {
   type WalletClient,
   type PublicClient,
 } from "viem";
+import { mainnet, base, arbitrum } from "viem/chains";
 import { UniversalRouterABI } from "../abis/index.js";
 import type { ISwapAdapter } from "./base.js";
 import type {
@@ -47,8 +50,51 @@ const UNISWAP_V4_ADDRESSES: Record<number, {
   },
 };
 
-// V4_SWAP command
-const V4_SWAP_COMMAND = 0x10;
+// Free public RPCs for read-only eth_call (reliable, high-uptime providers)
+const RPC_URLS: Record<number, string> = {
+  1:     "https://cloudflare-eth.com",
+  8453:  "https://mainnet.base.org",
+  42161: "https://arb1.arbitrum.io/rpc",
+};
+
+const CHAINS: Record<number, any> = {
+  1: mainnet,
+  8453: base,
+  42161: arbitrum,
+};
+
+// Quoter ABI (only the function we need)
+const QUOTER_ABI = [
+  {
+    name: "quoteExactInputSingle",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "params",
+        type: "tuple",
+        components: [
+          { name: "poolKey", type: "tuple", components: [
+            { name: "currency0",   type: "address" },
+            { name: "currency1",   type: "address" },
+            { name: "fee",         type: "uint24"  },
+            { name: "tickSpacing", type: "int24"   },
+            { name: "hooks",       type: "address" },
+          ]},
+          { name: "zeroForOne",       type: "bool"    },
+          { name: "exactAmount",      type: "uint128" },
+          { name: "sqrtPriceLimitX96", type: "uint160" },
+          { name: "hookData",         type: "bytes"   },
+        ],
+      },
+    ],
+    outputs: [
+      { name: "amountOut",      type: "int128[]" },
+      { name: "sqrtPriceX96After", type: "uint160[]" },
+      { name: "initializedTicksCrossed", type: "uint32[]" },
+    ],
+  },
+] as const;
 
 // V4 Router Actions
 const ACTIONS = {
@@ -72,39 +118,54 @@ export class UniswapV4Adapter implements ISwapAdapter {
     const addrs = UNISWAP_V4_ADDRESSES[intent.fromChainId];
     if (!addrs) throw new Error(`Uniswap v4 not deployed on chain ${intent.fromChainId}`);
 
-    const poolKey = await this.findBestPool(
-      intent.fromToken as Address,
-      intent.toToken as Address,
-      intent.fromChainId
-    );
+    const rpcUrl = RPC_URLS[intent.fromChainId];
+    const client = createPublicClient({ chain: CHAINS[intent.fromChainId], transport: http(rpcUrl) });
 
-    const amountOut = await this.getQuoteExact(
-      poolKey,
-      intent.fromAmount,
-      intent.fromChainId
-    );
+    const fees = [100, 500, 3000, 10000];
+    let bestAmountOut = 0n;
+    let bestPoolKey: PoolKey | null = null;
+
+    // Test multiple fee tiers to find the pool with the best liquidity (CRITICAL-3)
+    for (const fee of fees) {
+      const poolKey = this.buildPoolKey(intent.fromToken as Address, intent.toToken as Address, fee);
+      try {
+        const amountOut = await this.getQuoteExact(client, poolKey, intent.fromAmount, addrs.quoter);
+        if (amountOut > bestAmountOut) {
+          bestAmountOut = amountOut;
+          bestPoolKey = poolKey;
+        }
+      } catch {
+        // Pool doesn't exist or not enough liquidity, try next fee tier
+      }
+    }
+
+    if (!bestPoolKey || bestAmountOut === 0n) {
+      // HIGH-6: Throw instead of returning fake DefiLlama estimate
+      throw new Error(`No Uniswap V4 pool found with sufficient liquidity for this pair`);
+    }
 
     const calldata = this.encodeSwapCalldata(
-      poolKey,
+      bestPoolKey,
       intent.fromAmount,
-      amountOut,
+      bestAmountOut,
       intent.maxSlippageBps,
       intent.recipient,
       intent.deadline
     );
 
-    const gasCostWei = await this.estimateGas(intent.fromChainId, calldata);
+    const gasCostWei = await this.estimateGas(client, calldata);
+    const priceImpactBps = await this.getPriceImpact(intent.fromToken as Address, intent.toToken as Address, intent.fromAmount, bestAmountOut, intent.fromChainId);
 
     return {
       protocol:       "uniswap-v4",
-      amountOut,
+      amountOut:      bestAmountOut,
       gasCostWei,
       mevExposure:    0n,
-      netAmountOut:   amountOut - gasCostWei,
-      priceImpactBps: await this.getPriceImpact(poolKey, intent.fromAmount, amountOut, intent.fromChainId),
+      netAmountOut:   bestAmountOut > gasCostWei ? bestAmountOut - gasCostWei : 0n,
+      priceImpactBps,
       routeData: {
         type:              "uniswap-v4",
-        poolKey,
+        poolKey:           bestPoolKey,
         hookData:          "0x",
         sqrtPriceLimitX96: 0n,
         calldata,
@@ -145,34 +206,98 @@ export class UniswapV4Adapter implements ISwapAdapter {
     };
   }
 
-  private async findBestPool(
+  private buildPoolKey(
     token0: Address,
     token1: Address,
-    chainId: number
-  ): Promise<PoolKey> {
+    fee: number
+  ): PoolKey {
     const t0 = this.isNativeETH(token0) ? "0x0000000000000000000000000000000000000000" : token0;
     const t1 = this.isNativeETH(token1) ? "0x0000000000000000000000000000000000000000" : token1;
 
-    const [currency0, currency1] = BigInt(t0) < BigInt(t1)
-      ? [t0, t1]
-      : [t1, t0];
+    const [currency0, currency1] = BigInt(t0) < BigInt(t1) ? [t0, t1] : [t1, t0];
 
     return {
       currency0: currency0 as Address,
       currency1: currency1 as Address,
-      fee:         500,
-      tickSpacing: 10,
-      hooks:       "0x0000000000000000000000000000000000000000",
+      fee,
+      tickSpacing: fee === 100 ? 1 : fee === 500 ? 10 : fee === 3000 ? 60 : 200,
+      hooks: "0x0000000000000000000000000000000000000000",
     };
   }
 
   private async getQuoteExact(
+    client: any,
     poolKey: PoolKey,
     amountIn: bigint,
-    chainId: number
+    quoterAddr: Address
   ): Promise<bigint> {
-    // Stub return for illustration
-    return (amountIn * 98n) / 100n;
+    const zeroForOne = BigInt(poolKey.currency0) < BigInt(poolKey.currency1);
+
+    const result = await client.simulateContract({
+      address: quoterAddr,
+      abi: QUOTER_ABI,
+      functionName: "quoteExactInputSingle",
+      args: [{
+        poolKey: {
+          currency0: poolKey.currency0,
+          currency1: poolKey.currency1,
+          fee:       poolKey.fee,
+          tickSpacing: poolKey.tickSpacing,
+          hooks:     poolKey.hooks,
+        },
+        zeroForOne,
+        exactAmount: amountIn,
+        sqrtPriceLimitX96: 0n,
+        hookData: "0x",
+      }],
+    });
+
+    const amountOutArray = result.result[0] as bigint[];
+    const rawOut = amountOutArray[0];
+    return rawOut < 0n ? -rawOut : rawOut;
+  }
+
+  private async getPriceImpact(
+    fromToken: Address,
+    toToken: Address,
+    amountIn: bigint,
+    amountOut: bigint,
+    chainId: number
+  ): Promise<number> {
+    const chainName: Record<number, string> = { 1: "ethereum", 8453: "base", 42161: "arbitrum" };
+    const chain = chainName[chainId] || "ethereum";
+
+    const srcAddr = this.isNativeETH(fromToken) ? "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" : fromToken;
+    const dstAddr = this.isNativeETH(toToken) ? "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" : toToken;
+
+    try {
+      const coins = `${chain}:${srcAddr},${chain}:${dstAddr}`;
+      const res = await fetch(`https://coins.llama.fi/prices/current/${coins}`, { signal: AbortSignal.timeout(3000) });
+      if (!res.ok) return 30; // default to 0.3% on API failure
+
+      const data = await res.json() as any;
+      const srcKey = Object.keys(data.coins).find(k => k.toLowerCase().includes(srcAddr.toLowerCase().slice(0, 10)));
+      const dstKey = Object.keys(data.coins).find(k => k.toLowerCase().includes(dstAddr.toLowerCase().slice(0, 10)));
+      if (!srcKey || !dstKey) return 30;
+
+      const srcPrice = data.coins[srcKey].price as number;
+      const dstPrice = data.coins[dstKey].price as number;
+      const srcDecimals = data.coins[srcKey].decimals as number;
+      const dstDecimals = data.coins[dstKey].decimals as number;
+
+      const srcAmount = Number(amountIn) / (10 ** srcDecimals);
+      const usdValue = srcAmount * srcPrice;
+      const expectedDstAmount = usdValue / dstPrice;
+      const actualDstAmount = Number(amountOut) / (10 ** dstDecimals);
+
+      if (expectedDstAmount <= 0) return 0;
+      
+      const impact = (expectedDstAmount - actualDstAmount) / expectedDstAmount;
+      const impactBps = Math.round(impact * 10000);
+      return Math.max(0, impactBps);
+    } catch {
+      return 30;
+    }
   }
 
   private encodeSwapCalldata(
@@ -183,7 +308,7 @@ export class UniswapV4Adapter implements ISwapAdapter {
     recipient: Address,
     deadline: number
   ): Hex {
-    const minOut = amountIn * BigInt(10000 - slippageBps) / 10000n;
+    const minOut = amountOut * BigInt(10000 - slippageBps) / 10000n;
 
     // Encode exact input single params
     const exactInputSingleParams = encodeAbiParameters(
@@ -248,17 +373,16 @@ export class UniswapV4Adapter implements ISwapAdapter {
     });
   }
 
-  private async estimateGas(_chainId: number, _calldata: Hex): Promise<bigint> {
-    return 130_000n * 2_000_000_000n;
-  }
-
-  private async getPriceImpact(
-    _poolKey: PoolKey,
-    _amountIn: bigint,
-    _amountOut: bigint,
-    _chainId: number
-  ): Promise<number> {
-    return 30; // 0.3% stub
+  private async estimateGas(client: any, _calldata: Hex): Promise<bigint> {
+    try {
+      // CRITICAL-1: Fetch actual real-time gas price from the network instead of hardcoding 20 gwei
+      const gasPrice = await client.getGasPrice();
+      // Uniswap V4 swaps take roughly 150k-200k gas depending on tick crossing
+      return gasPrice * 180_000n;
+    } catch {
+      // Fallback if RPC getGasPrice fails
+      return 180_000n * 5_000_000_000n; // 5 gwei
+    }
   }
 
   private isNativeETH(addr: Address): boolean {

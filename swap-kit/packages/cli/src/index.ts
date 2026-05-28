@@ -14,7 +14,7 @@ dotenv.config();
 
 const program = new Command();
 const kit = new SwapKit({
-  oneInchApiKey: process.env.ONE_INCH_API_KEY || "YOUR_1INCH_KEY",
+  oneInchApiKey: process.env.ONE_INCH_API_KEY || process.env.ONEINCH_API_KEY || "",
 });
 
 // Standard Chain mapping
@@ -54,7 +54,17 @@ program
       const quote = quotes[0]; // best quote
       spinner.succeed("Route optimized successfully!");
       
-      displayQuote(quote);
+      // Fetch the real destination token decimals to format the output correctly
+      let destDecimals = 18;
+      try {
+        const { getPublicClient, getTokenDecimals } = await import("@swap-kit/core");
+        const client = getPublicClient(intent.toChainId);
+        destDecimals = await getTokenDecimals(intent.toToken as any, client as any);
+      } catch (e) {
+        // fallback to 18
+      }
+
+      displayQuote(quote, destDecimals);
     } catch (error: any) {
       spinner.fail(chalk.red("Failed to get quote"));
       console.error(error.message);

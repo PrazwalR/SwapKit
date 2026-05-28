@@ -16,12 +16,13 @@
 import * as dotenv from "dotenv";
 dotenv.config({ path: "packages/core/.env" });
 
+import { getPublicClient } from "../utils/chain.js";
 import { createPublicClient, http, formatUnits } from "viem";
-import { mainnet } from "viem/chains";
+import { mainnet, base, arbitrum } from "viem/chains";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-const ALCHEMY_KEY = process.env.ALCHEMY_KEY!;
+const ALCHEMY_KEY = process.env.ALCHEMY_KEY;
 const ONEINCH_API_KEY = process.env["1INCH_API_KEY"];
 
 // Tokens on mainnet
@@ -47,7 +48,7 @@ const V4_POOL_MANAGER = "0x000000000004444c5dc75cB358380D2e3dE08A90";
 
 const publicClient = createPublicClient({
   chain: mainnet,
-  transport: http(`https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`),
+  transport: http(ALCHEMY_KEY ? `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : "https://eth.merkle.io"),
 });
 
 // ─── Test Harness ────────────────────────────────────────────────────────────
@@ -96,7 +97,7 @@ async function sleep(ms: number) {
 async function testInfrastructure() {
   section("🔗 SECTION 1: Infrastructure & RPC");
 
-  await test("Alchemy RPC — eth_blockNumber returns valid block", async () => {
+  await test("Public RPC — eth_blockNumber returns valid block", async () => {
     const block = await publicClient.getBlockNumber();
     assert(block > 21_000_000n, `Block too low: ${block}`);
     console.log(`(Block: ${block})`);
@@ -108,24 +109,26 @@ async function testInfrastructure() {
     console.log(`(${(code!.length / 2 - 1)} bytes)`);
   });
 
-  await test("Alchemy RPC — eth_getBalance for vitalik.eth", async () => {
+  await test("Public RPC — eth_getBalance for vitalik.eth", async () => {
     const balance = await publicClient.getBalance({ address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045" as `0x${string}` });
     assert(balance > 0n, `Vitalik balance is 0?`);
     console.log(`(${formatUnits(balance, 18)} ETH)`);
   });
 
-  await test("Alchemy RPC — Base chain connectivity", async () => {
+  await test("Public RPC — Base chain connectivity", async () => {
     const baseClient = createPublicClient({
-      transport: http(`https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`),
+      chain: base,
+      transport: http(ALCHEMY_KEY ? `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : "https://mainnet.base.org"),
     });
     const block = await baseClient.getBlockNumber();
     assert(block > 1_000_000n, `Base block too low: ${block}`);
     console.log(`(Base Block: ${block})`);
   });
 
-  await test("Alchemy RPC — Arbitrum chain connectivity", async () => {
+  await test("Public RPC — Arbitrum chain connectivity", async () => {
     const arbClient = createPublicClient({
-      transport: http(`https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`),
+      chain: arbitrum,
+      transport: http(ALCHEMY_KEY ? `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : "https://arb1.arbitrum.io/rpc"),
     });
     const block = await arbClient.getBlockNumber();
     assert(block > 100_000_000n, `Arb block too low: ${block}`);
@@ -140,7 +143,7 @@ async function testParaswap() {
 
   await test("Mainnet — ETH → USDC (1 ETH)", async () => {
     const res = await fetch(
-      `https://api.paraswap.io/prices?srcToken=${ETH_NATIVE}&destToken=${USDC}&amount=${AMOUNT_1_ETH}&srcDecimals=18&destDecimals=6&side=SELL&network=1`
+      `https://apiv5.paraswap.io/prices?srcToken=${ETH_NATIVE}&destToken=${USDC}&amount=${AMOUNT_1_ETH}&srcDecimals=18&destDecimals=6&side=SELL&network=1`
     );
     assert(res.ok, `HTTP ${res.status}`);
     const data = await res.json() as any;
@@ -151,7 +154,7 @@ async function testParaswap() {
 
   await test("Mainnet — USDC → ETH (2000 USDC)", async () => {
     const res = await fetch(
-      `https://api.paraswap.io/prices?srcToken=${USDC}&destToken=${ETH_NATIVE}&amount=2000000000&srcDecimals=6&destDecimals=18&side=SELL&network=1`
+      `https://apiv5.paraswap.io/prices?srcToken=${USDC}&destToken=${ETH_NATIVE}&amount=2000000000&srcDecimals=6&destDecimals=18&side=SELL&network=1`
     );
     assert(res.ok, `HTTP ${res.status}`);
     const data = await res.json() as any;
@@ -162,7 +165,7 @@ async function testParaswap() {
 
   await test("Mainnet — WBTC → USDC (0.05 WBTC)", async () => {
     const res = await fetch(
-      `https://api.paraswap.io/prices?srcToken=${WBTC}&destToken=${USDC}&amount=5000000&srcDecimals=8&destDecimals=6&side=SELL&network=1`
+      `https://apiv5.paraswap.io/prices?srcToken=${WBTC}&destToken=${USDC}&amount=5000000&srcDecimals=8&destDecimals=6&side=SELL&network=1`
     );
     assert(res.ok, `HTTP ${res.status}`);
     const data = await res.json() as any;
@@ -173,7 +176,7 @@ async function testParaswap() {
 
   await test("Mainnet — DAI → USDT stablecoin swap (1000 DAI)", async () => {
     const res = await fetch(
-      `https://api.paraswap.io/prices?srcToken=${DAI}&destToken=${USDT}&amount=1000000000000000000000&srcDecimals=18&destDecimals=6&side=SELL&network=1`
+      `https://apiv5.paraswap.io/prices?srcToken=${DAI}&destToken=${USDT}&amount=1000000000000000000000&srcDecimals=18&destDecimals=6&side=SELL&network=1`
     );
     assert(res.ok, `HTTP ${res.status}`);
     const data = await res.json() as any;
@@ -185,7 +188,7 @@ async function testParaswap() {
 
   await test("Base — WETH → USDC (1 WETH)", async () => {
     const res = await fetch(
-      `https://api.paraswap.io/prices?srcToken=${BASE_WETH}&destToken=${BASE_USDC}&amount=${AMOUNT_1_ETH}&srcDecimals=18&destDecimals=6&side=SELL&network=8453`
+      `https://apiv5.paraswap.io/prices?srcToken=${BASE_WETH}&destToken=${BASE_USDC}&amount=${AMOUNT_1_ETH}&srcDecimals=18&destDecimals=6&side=SELL&network=8453`
     );
     assert(res.ok, `HTTP ${res.status}`);
     const data = await res.json() as any;
@@ -196,7 +199,7 @@ async function testParaswap() {
 
   await test("Arbitrum — WETH → USDC (1 WETH)", async () => {
     const res = await fetch(
-      `https://api.paraswap.io/prices?srcToken=${ARB_WETH}&destToken=${ARB_USDC}&amount=${AMOUNT_1_ETH}&srcDecimals=18&destDecimals=6&side=SELL&network=42161`
+      `https://apiv5.paraswap.io/prices?srcToken=${ARB_WETH}&destToken=${ARB_USDC}&amount=${AMOUNT_1_ETH}&srcDecimals=18&destDecimals=6&side=SELL&network=42161`
     );
     assert(res.ok, `HTTP ${res.status}`);
     const data = await res.json() as any;
@@ -208,7 +211,7 @@ async function testParaswap() {
   await test("Mainnet — Tiny amount (0.001 ETH → USDC)", async () => {
     const tinyAmount = 1_000_000_000_000_000n; // 0.001 ETH
     const res = await fetch(
-      `https://api.paraswap.io/prices?srcToken=${ETH_NATIVE}&destToken=${USDC}&amount=${tinyAmount}&srcDecimals=18&destDecimals=6&side=SELL&network=1`
+      `https://apiv5.paraswap.io/prices?srcToken=${ETH_NATIVE}&destToken=${USDC}&amount=${tinyAmount}&srcDecimals=18&destDecimals=6&side=SELL&network=1`
     );
     assert(res.ok, `HTTP ${res.status}`);
     const data = await res.json() as any;
@@ -529,7 +532,7 @@ async function testEdgeCases() {
 
   await test("Paraswap — zero amount should fail gracefully", async () => {
     const res = await fetch(
-      `https://api.paraswap.io/prices?srcToken=${ETH_NATIVE}&destToken=${USDC}&amount=0&srcDecimals=18&destDecimals=6&side=SELL&network=1`
+      `https://apiv5.paraswap.io/prices?srcToken=${ETH_NATIVE}&destToken=${USDC}&amount=0&srcDecimals=18&destDecimals=6&side=SELL&network=1`
     );
     // Should return an error, not crash
     assert(res.status === 400 || res.status === 200, `Unexpected status: ${res.status}`);
@@ -537,14 +540,14 @@ async function testEdgeCases() {
 
   await test("Paraswap — invalid token address should fail", async () => {
     const res = await fetch(
-      `https://api.paraswap.io/prices?srcToken=0xDEAD&destToken=${USDC}&amount=${AMOUNT_1_ETH}&srcDecimals=18&destDecimals=6&side=SELL&network=1`
+      `https://apiv5.paraswap.io/prices?srcToken=0xDEAD&destToken=${USDC}&amount=${AMOUNT_1_ETH}&srcDecimals=18&destDecimals=6&side=SELL&network=1`
     );
     assert(!res.ok || res.status >= 400, "Should have failed for invalid token");
   });
 
   await test("Paraswap — unsupported chain (999) should fail", async () => {
     const res = await fetch(
-      `https://api.paraswap.io/prices?srcToken=${ETH_NATIVE}&destToken=${USDC}&amount=${AMOUNT_1_ETH}&srcDecimals=18&destDecimals=6&side=SELL&network=999`
+      `https://apiv5.paraswap.io/prices?srcToken=${ETH_NATIVE}&destToken=${USDC}&amount=${AMOUNT_1_ETH}&srcDecimals=18&destDecimals=6&side=SELL&network=999`
     );
     assert(!res.ok, `Expected error for chain 999, got ${res.status}`);
   });
@@ -605,7 +608,7 @@ async function testPriceComparison() {
 
   await test("Paraswap — benchmark 1 ETH → USDC price", async () => {
     const res = await fetch(
-      `https://api.paraswap.io/prices?srcToken=${ETH_NATIVE}&destToken=${USDC}&amount=${AMOUNT_1_ETH}&srcDecimals=18&destDecimals=6&side=SELL&network=1`
+      `https://apiv5.paraswap.io/prices?srcToken=${ETH_NATIVE}&destToken=${USDC}&amount=${AMOUNT_1_ETH}&srcDecimals=18&destDecimals=6&side=SELL&network=1`
     );
     assert(res.ok, `HTTP ${res.status}`);
     const data = await res.json() as any;
@@ -653,7 +656,7 @@ async function main() {
   console.log("╔══════════════════════════════════════════════════════════════╗");
   console.log("║       SwapKit — Full Integration & Edge Case Test Suite     ║");
   console.log("╚══════════════════════════════════════════════════════════════╝");
-  console.log(`  Alchemy Key:  ...${ALCHEMY_KEY?.slice(-6)}`);
+  console.log(`  Alchemy Key:  ${ALCHEMY_KEY ? `...${ALCHEMY_KEY.slice(-6)}` : "NOT SET ⚠️ (Using Public RPCs)"}`);
   console.log(`  1inch Key:    ${ONEINCH_API_KEY ? `...${ONEINCH_API_KEY.slice(-6)}` : "NOT SET ⚠️"}`);
   console.log(`  Timestamp:    ${new Date().toISOString()}`);
 

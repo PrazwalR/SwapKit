@@ -17,7 +17,7 @@ export interface ChainConfig {
 const CHAIN_CONFIGS: Record<number, ChainConfig> = {
   1: {
     chain:             mainnet,
-    rpcUrl:            "https://eth.llamarpc.com",
+    rpcUrl:            "https://cloudflare-eth.com",
     blockExplorerUrl:  "https://etherscan.io",
     nativeSymbol:      "ETH",
     blockTime:         12,

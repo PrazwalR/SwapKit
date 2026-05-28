@@ -58,7 +58,10 @@ export interface UniswapV4RouteData {
 export interface OneInchRouteData {
   type: "1inch-fusion";
   orderHash: Hex;
-  order: FusionOrderStruct;
+  order: Record<string, unknown>; // Raw 1inch API response (varies by endpoint)
+  srcToken: string;   // Source token address (for execution)
+  dstToken: string;   // Destination token address (for execution)
+  fromAmount: string; // Input amount as string (for execution)
   secrets: Hex[]; // HTLC secrets for cross-chain
 }
 
@@ -105,7 +108,7 @@ export interface SwapResult {
 // ─── MEV ─────────────────────────────────────────────────────────────────────
 
 export interface MEVReport {
-  sandwichRisk: "none" | "low" | "medium" | "high";
+  sandwichRisk: "none" | "low" | "medium" | "high" | "unknown";
   estimatedMEVWei: bigint;
   /** Recommended slippage to set given current mempool conditions */
   recommendedSlippageBps: number;
