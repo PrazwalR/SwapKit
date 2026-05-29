@@ -1,0 +1,3 @@
+    Finished `release` profile [optimized] target(s) in 0.33s
+     Running `/Users/prazw/Desktop/Web3/IntentKit/swap-kit/target/release/swap-kit-engine`
+[2m2026-05-29T19:58:20.186133Z[0m [32m INFO[0m [2mswap_kit_engine[0m[2m:[0m swap-kit-engine listening on 0.0.0.0:3030

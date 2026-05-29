@@ -1,6 +1,6 @@
 [package]
 name = "swap-kit-engine"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "High-performance MEV simulation and quote aggregation engine for swap-kit"
 license = "MIT"
@@ -15,7 +15,7 @@ path = "src/lib.rs"
 
 [dependencies]
 # Shared types
-swap-kit-types = { version = "0.1.0", path = "../swap-kit-types" }
+swap-kit-types = { version = "0.1.1", path = "../swap-kit-types" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

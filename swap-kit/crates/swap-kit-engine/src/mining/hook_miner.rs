@@ -32,7 +32,9 @@ use tiny_keccak::{Hasher, Keccak};
 /// Returns the first salt found that matches, or reports no match after
 /// max_iterations attempts.
 pub fn mine(req: MineRequest) -> MineResult {
-    let max_iterations = req.max_iterations.unwrap_or(1_000_000);
+    let requested_iters = req.max_iterations.unwrap_or(1_000_000);
+    // Hard cap at 10M to prevent CPU starvation / DoS attacks
+    let max_iterations = std::cmp::min(requested_iters, 10_000_000);
 
     // Parse deployer address (remove 0x prefix)
     let deployer_hex = req.deployer.strip_prefix("0x").unwrap_or(&req.deployer);
@@ -146,10 +148,10 @@ mod tests {
     #[test]
     fn test_compute_create2_address() {
         // Known CREATE2 test vector
-        let deployer = hex_decode("0000000000000000000000000000000000000000");
+        let deployer = hex_decode("0000000000000000000000000000000000000000").unwrap();
         let mut salt = [0u8; 32];
         let init_code_hash =
-            hex_decode("0000000000000000000000000000000000000000000000000000000000000000");
+            hex_decode("0000000000000000000000000000000000000000000000000000000000000000").unwrap();
 
         let address = compute_create2_address(&deployer, &salt, &init_code_hash);
         assert_eq!(address.len(), 20);
@@ -177,7 +179,7 @@ mod tests {
         let original = vec![0xde, 0xad, 0xbe, 0xef];
         let encoded = hex_encode(&original);
         assert_eq!(encoded, "deadbeef");
-        let decoded = hex_decode(&encoded);
+        let decoded = hex_decode(&encoded).unwrap();
         assert_eq!(decoded, original);
     }
 }

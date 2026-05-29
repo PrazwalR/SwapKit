@@ -21,9 +21,17 @@ use swap_kit_types::{SimulateRequest, SimulateResponse};
 /// In production, this would connect to an Ethereum node and analyze
 /// the mempool for pending transactions targeting the same pool.
 pub async fn simulate(req: &SimulateRequest) -> Result<SimulateResponse> {
-    // Parse amounts
-    let from_amount: u128 = req.from_amount.parse().unwrap_or(0);
-    let amount_out: u128 = req.amount_out.parse().unwrap_or(0);
+    // Parse amounts securely: reject malformed or overflowing inputs
+    let from_amount: u128 = req
+        .from_amount
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid from_amount: must be a positive integer within u128 bounds"))?;
+        
+    let amount_out: u128 = req
+        .amount_out
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid amount_out: must be a positive integer within u128 bounds"))?;
+        
     let slippage_bps: u64 = req.slippage_bps as u64;
 
     // Classify risk based on trade size and slippage
@@ -42,7 +50,7 @@ pub async fn simulate(req: &SimulateRequest) -> Result<SimulateResponse> {
     let mev_fraction = (slippage_bps * 70) / 10000; // 70% of slippage tolerance
     let estimated_mev = (amount_out as u128)
         .checked_mul(mev_fraction as u128)
-        .unwrap_or(0)
+        .unwrap_or(u128::MAX) // If massive overflow, assume max MEV extraction
         / 10000;
 
     // Recommend reducing slippage if MEV risk is high
@@ -133,5 +141,68 @@ mod tests {
         let result = safe_default();
         assert_eq!(result.sandwich_risk, "low");
         assert_eq!(result.estimated_mev_wei, "0");
+    }
+
+    #[tokio::test]
+    async fn test_simulate_negative_amount() {
+        let req = SimulateRequest {
+            from_token: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(),
+            to_token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string(),
+            from_amount: "-100000000000000000".to_string(), // Negative
+            chain_id: 1,
+            protocol: "uniswap-v4".to_string(),
+            amount_out: "200000000".to_string(),
+            slippage_bps: 50,
+        };
+        let result = simulate(&req).await;
+        // Negative amount fails parsing
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_simulate_massive_amount() {
+        let req = SimulateRequest {
+            from_token: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(),
+            to_token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string(),
+            from_amount: "99999999999999999999999999999999999999999999999999999999999".to_string(), // Exceeds u128::MAX
+            chain_id: 1,
+            protocol: "uniswap-v4".to_string(),
+            amount_out: "200000000".to_string(),
+            slippage_bps: 50,
+        };
+        let result = simulate(&req).await;
+        // Exceeds u128::MAX fails parsing
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_simulate_invalid_type_amount() {
+        let req = SimulateRequest {
+            from_token: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(),
+            to_token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string(),
+            from_amount: "invalid_amount".to_string(),
+            chain_id: 1,
+            protocol: "uniswap-v4".to_string(),
+            amount_out: "invalid_out".to_string(),
+            slippage_bps: 50,
+        };
+        let result = simulate(&req).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_simulate_overflow_mev() {
+        let req = SimulateRequest {
+            from_token: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(),
+            to_token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string(),
+            from_amount: "100000000000000000000".to_string(),
+            chain_id: 1,
+            protocol: "uniswap-v4".to_string(),
+            amount_out: "340282366920938463463374607431768211455".to_string(), // u128::MAX
+            slippage_bps: 2000,
+        };
+        let result = simulate(&req).await.unwrap();
+        // checked_mul returns None which defaults to u128::MAX for safety, then divided by 10000
+        assert_eq!(result.estimated_mev_wei, (u128::MAX / 10000).to_string());
     }
 }
