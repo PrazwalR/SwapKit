@@ -24,7 +24,7 @@ export class QuoteEngine {
     intent: Required<SwapIntent>,
     config: QuoteEngineConfig = {}
   ): Promise<QuoteResult[]> {
-    const { timeoutMs = 5000 } = config;
+    const { timeoutMs = 15000 } = config;
 
     const applicable = intent.protocols.filter(p => {
       const adapter = this.adapters.get(p);

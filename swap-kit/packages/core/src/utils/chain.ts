@@ -17,7 +17,7 @@ export interface ChainConfig {
 const CHAIN_CONFIGS: Record<number, ChainConfig> = {
   1: {
     chain:             mainnet,
-    rpcUrl:            "https://cloudflare-eth.com",
+    rpcUrl:            "https://eth.drpc.org",
     blockExplorerUrl:  "https://etherscan.io",
     nativeSymbol:      "ETH",
     blockTime:         12,
@@ -106,7 +106,12 @@ export function getPublicClient(
   rpcUrl?: string
 ): PublicClient {
   const config = getChainConfig(chainId);
-  const url = rpcUrl ?? config.rpcUrl;
+  const envOverrides: Record<number, string | undefined> = {
+    1: process.env.RPC_ETHEREUM,
+    8453: process.env.RPC_BASE,
+    42161: process.env.RPC_ARBITRUM,
+  };
+  const url = rpcUrl ?? envOverrides[chainId] ?? config.rpcUrl;
   const cacheKey = `${chainId}:${url}`;
 
   const cached = clientCache.get(cacheKey);

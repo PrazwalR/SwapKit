@@ -15,7 +15,7 @@ path = "src/lib.rs"
 
 [dependencies]
 # Shared types
-swap-kit-types = { path = "../swap-kit-types" }
+swap-kit-types = { version = "0.1.0", path = "../swap-kit-types" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

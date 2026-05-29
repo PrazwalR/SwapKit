@@ -38,7 +38,7 @@ export async function getTokenDecimals(
     const result = Number(decimals);
     decimalsCache.set(cacheKey, result);
     return result;
-  } catch {
+  } catch (err) { console.error("DECIMALS ERROR:", err);
     // Default to 18 if contract call fails
     return 18;
   }
@@ -68,7 +68,7 @@ export async function getTokenSymbol(
       functionName: "symbol",
     });
     return symbol as string;
-  } catch {
+  } catch (err) { console.error("DECIMALS ERROR:", err);
     return "UNKNOWN";
   }
 }
@@ -140,7 +140,7 @@ export async function getTokenBalance(
       args: [ownerAddress],
     });
     return balance as bigint;
-  } catch {
+  } catch (err) { console.error("DECIMALS ERROR:", err);
     return 0n;
   }
 }

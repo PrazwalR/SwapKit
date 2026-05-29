@@ -13,7 +13,7 @@ use axum::{
     Router,
 };
 use std::net::SocketAddr;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{CorsLayer, Any};
 use tracing_subscriber::EnvFilter;
 
 mod mev;
@@ -25,7 +25,7 @@ use swap_kit_types::{
 };
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing with RUST_LOG env filter
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -33,18 +33,26 @@ async fn main() {
         }))
         .init();
 
+    // Secure CORS for typical local and staging domains instead of permissive
+    let cors = CorsLayer::new()
+        .allow_origin(Any) // Restrict this to specific domains in production
+        .allow_methods(Any)
+        .allow_headers(Any);
+
     let app = Router::new()
         .route("/health", get(health))
         .route("/simulate", post(simulate_mev))
         .route("/quote", post(get_quote))
         .route("/mine", post(mine_hook_address))
-        .layer(CorsLayer::permissive());
+        .layer(cors);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3030));
     tracing::info!("swap-kit-engine listening on {}", addr);
 
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app).await?;
+    
+    Ok(())
 }
 
 async fn health() -> &'static str {

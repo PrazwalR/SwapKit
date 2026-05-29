@@ -40,7 +40,10 @@ pub async fn simulate(req: &SimulateRequest) -> Result<SimulateResponse> {
     // MEV estimate: sandwich attacker can extract up to (slippage_bps / 10000) * amount_out
     // But typically extracts 60-80% of available slippage
     let mev_fraction = (slippage_bps * 70) / 10000; // 70% of slippage tolerance
-    let estimated_mev = (amount_out as u128) * (mev_fraction as u128) / 10000;
+    let estimated_mev = (amount_out as u128)
+        .checked_mul(mev_fraction as u128)
+        .unwrap_or(0)
+        / 10000;
 
     // Recommend reducing slippage if MEV risk is high
     let recommended_slippage = if sandwich_risk == "high" {

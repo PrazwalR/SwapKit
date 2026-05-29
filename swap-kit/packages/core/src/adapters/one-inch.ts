@@ -83,7 +83,8 @@ export class OneInchFusionAdapter implements ISwapAdapter {
         dstToken: intent.toToken as string,
         fromAmount: intent.fromAmount.toString(),
         secrets: data.secrets || [],
-      },
+        slippageBps: intent.maxSlippageBps,
+      } as any,
       validUntil: Math.floor(Date.now() / 1000) + 120,
     };
   }
@@ -103,7 +104,8 @@ export class OneInchFusionAdapter implements ISwapAdapter {
       throw new Error("Cross-chain Fusion+ execution is not supported in this version. Requires 1inch Fusion SDK signature.");
     }
 
-    const swapUrl = `https://api.1inch.dev/swap/v6.0/${chainId}/swap?src=${routeData.srcToken}&dst=${routeData.dstToken}&amount=${routeData.fromAmount}&from=${userAddress}&slippage=0.5&disableEstimate=true`;
+    const slippagePct = ((routeData as any).slippageBps || 50) / 100;
+    const swapUrl = `https://api.1inch.dev/swap/v6.0/${chainId}/swap?src=${routeData.srcToken}&dst=${routeData.dstToken}&amount=${routeData.fromAmount}&from=${userAddress}&slippage=${slippagePct}&disableEstimate=true`;
 
     const res = await fetch(swapUrl, {
       headers: { Authorization: `Bearer ${this.apiKey}` },

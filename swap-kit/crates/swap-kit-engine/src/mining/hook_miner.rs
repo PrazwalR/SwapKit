@@ -36,23 +36,32 @@ pub fn mine(req: MineRequest) -> MineResult {
 
     // Parse deployer address (remove 0x prefix)
     let deployer_hex = req.deployer.strip_prefix("0x").unwrap_or(&req.deployer);
-    let deployer_bytes = hex_decode(deployer_hex);
+    let deployer_bytes = match hex_decode(deployer_hex) {
+        Some(b) if b.len() == 20 => b,
+        _ => return MineResult { salt: String::new(), address: String::new(), attempts: 0, found: false },
+    };
 
     // Parse init_code_hash (remove 0x prefix)
     let hash_hex = req
         .init_code_hash
         .strip_prefix("0x")
         .unwrap_or(&req.init_code_hash);
-    let init_code_hash = hex_decode(hash_hex);
+    let init_code_hash = match hex_decode(hash_hex) {
+        Some(b) if b.len() == 32 => b,
+        _ => return MineResult { salt: String::new(), address: String::new(), attempts: 0, found: false },
+    };
 
     // Parse desired prefix (remove 0x prefix)
     let prefix = req.prefix.strip_prefix("0x").unwrap_or(&req.prefix);
-    let prefix_bytes = hex_decode(prefix);
+    let prefix_bytes = match hex_decode(prefix) {
+        Some(b) => b,
+        _ => return MineResult { salt: String::new(), address: String::new(), attempts: 0, found: false },
+    };
 
     // Use rayon to parallelize the search across CPU cores
     // Split the search space into chunks
     let chunk_size = 10_000u64;
-    let num_chunks = (max_iterations + chunk_size - 1) / chunk_size;
+    let num_chunks = (max_iterations.saturating_add(chunk_size.saturating_sub(1))) / chunk_size;
 
     let result = (0..num_chunks)
         .into_par_iter()
@@ -109,12 +118,18 @@ fn compute_create2_address(deployer: &[u8], salt: &[u8; 32], init_code_hash: &[u
 }
 
 /// Decode a hex string into bytes.
-fn hex_decode(hex: &str) -> Vec<u8> {
+fn hex_decode(hex: &str) -> Option<Vec<u8>> {
+    let hex = if hex.len() % 2 != 0 {
+        format!("0{}", hex) // pad odd length
+    } else {
+        hex.to_string()
+    };
+    
     (0..hex.len())
         .step_by(2)
         .map(|i| {
             let end = std::cmp::min(i + 2, hex.len());
-            u8::from_str_radix(&hex[i..end], 16).unwrap_or(0)
+            u8::from_str_radix(&hex[i..end], 16).ok()
         })
         .collect()
 }

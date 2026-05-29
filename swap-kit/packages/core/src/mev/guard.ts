@@ -56,10 +56,10 @@ export class MEVGuard {
       if (this.config.failOpen) {
         console.warn("[swap-kit] MEV simulation unavailable, proceeding without it:", err);
         return {
-          sandwichRisk:           "unknown" as any, // HIGH-4/CRITICAL-4 fix: explicitly mark as unknown
-          estimatedMEVWei:        0n,
+          sandwichRisk: "unknown",
+          estimatedMEVWei: 0n,
           recommendedSlippageBps: intent.maxSlippageBps,
-          detectedBots:           [],
+          detectedBots: [],
         };
       }
       throw err;
@@ -71,12 +71,9 @@ export class MEVGuard {
    * This gives a realistic "what the user will actually receive" number.
    */
   applyMEVToQuote(quote: QuoteResult, report: MEVReport): QuoteResult {
-    return {
-      ...quote,
-      mevExposure:  report.estimatedMEVWei,
-      netAmountOut: quote.amountOut > report.estimatedMEVWei
-        ? quote.amountOut - report.estimatedMEVWei
-        : 0n,
-    };
+    const updated = { ...quote };
+    updated.mevExposure = report.estimatedMEVWei;
+    updated.netAmountOut = quote.netAmountOut - report.estimatedMEVWei;
+    return updated;
   }
 }

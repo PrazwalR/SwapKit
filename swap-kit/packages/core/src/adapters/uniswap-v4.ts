@@ -18,6 +18,7 @@ import type {
   PoolKey,
   UniswapV4RouteData,
 } from "../types.js";
+import { getPublicClient } from "../utils/chain.js";
 
 // Chain-specific addresses (Uniswap v4 deployments)
 const UNISWAP_V4_ADDRESSES: Record<number, {
@@ -50,12 +51,7 @@ const UNISWAP_V4_ADDRESSES: Record<number, {
   },
 };
 
-// Free public RPCs for read-only eth_call (reliable, high-uptime providers)
-const RPC_URLS: Record<number, string> = {
-  1:     "https://cloudflare-eth.com",
-  8453:  "https://mainnet.base.org",
-  42161: "https://arb1.arbitrum.io/rpc",
-};
+
 
 const CHAINS: Record<number, any> = {
   1: mainnet,
@@ -118,8 +114,7 @@ export class UniswapV4Adapter implements ISwapAdapter {
     const addrs = UNISWAP_V4_ADDRESSES[intent.fromChainId];
     if (!addrs) throw new Error(`Uniswap v4 not deployed on chain ${intent.fromChainId}`);
 
-    const rpcUrl = RPC_URLS[intent.fromChainId];
-    const client = createPublicClient({ chain: CHAINS[intent.fromChainId], transport: http(rpcUrl) });
+    const client = getPublicClient(intent.fromChainId);
 
     const fees = [100, 500, 3000, 10000];
     let bestAmountOut = 0n;
@@ -381,7 +376,7 @@ export class UniswapV4Adapter implements ISwapAdapter {
       return gasPrice * 180_000n;
     } catch {
       // Fallback if RPC getGasPrice fails
-      return 180_000n * 5_000_000_000n; // 5 gwei
+      return 180_000n * 20_000_000_000n; // 20 gwei
     }
   }
 

@@ -3,8 +3,10 @@ import { formatUnits, parseUnits } from "viem";
 
 export function formatAmount(amount: bigint, decimals: number = 18): string {
   const formatted = formatUnits(amount, decimals);
-  // Optional: simplify long decimals
-  return Number(formatted).toLocaleString("en-US", { maximumFractionDigits: 6 });
+  // Avoid precision loss from Number conversion
+  const [whole, fraction] = formatted.split(".");
+  if (!fraction) return whole;
+  return `${whole}.${fraction.slice(0, 6)}`;
 }
 
 export function parseAmount(amountStr: string, decimals: number = 18): bigint {
@@ -24,7 +26,7 @@ export function displayQuote(quote: any, decimals: number = 18) {
   console.log(`Protocol:      ${color.bold(quote.protocol)}`);
   console.log(`Amount Out:    ${chalk.green.bold(formatAmount(quote.amountOut, decimals))}`);
   if (quote.mevExposure > 0n) {
-    console.log(`MEV Exposure:  ${chalk.red(formatAmount(quote.mevExposure, 18))} ETH`);
+    console.log(`MEV Exposure:  ${chalk.red(formatAmount(quote.mevExposure, 18))} (Native)`);
   } else {
     console.log(`MEV Exposure:  ${chalk.green("Protected 🛡️")}`);
   }

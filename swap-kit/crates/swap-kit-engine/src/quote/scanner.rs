@@ -48,10 +48,10 @@ async fn quote_uniswap_v4(req: &QuoteRequest) -> Result<SingleQuote> {
 
     // Uniswap V4 typically offers ~0.3% fee for major pairs
     // Simulate 98% output (2% price impact + fees)
-    let amount_out = from_amount * 98 / 100;
+    let amount_out = from_amount.checked_mul(98).unwrap_or(0) / 100;
 
     // V4 gas is ~130k due to singleton + flash accounting
-    let gas_cost = 130_000u128 * 2_000_000_000; // 130k gas @ 2 gwei
+    let gas_cost = 130_000u128.checked_mul(2_000_000_000).unwrap_or(0); // 130k gas @ 2 gwei
 
     Ok(SingleQuote {
         protocol: "uniswap-v4".to_string(),
@@ -68,10 +68,10 @@ async fn quote_paraswap(req: &QuoteRequest) -> Result<SingleQuote> {
     let from_amount: u128 = req.from_amount.parse().unwrap_or(0);
 
     // Paraswap aggregates multiple DEXs, typically gets slightly better rates
-    let amount_out = from_amount * 97 / 100; // 3% total cost
+    let amount_out = from_amount.checked_mul(97).unwrap_or(0) / 100; // 3% total cost
 
     // Paraswap gas varies but typically ~150k
-    let gas_cost = 150_000u128 * 2_000_000_000;
+    let gas_cost = 150_000u128.checked_mul(2_000_000_000).unwrap_or(0);
 
     Ok(SingleQuote {
         protocol: "paraswap".to_string(),
@@ -89,7 +89,7 @@ async fn quote_1inch_fusion(req: &QuoteRequest) -> Result<SingleQuote> {
     let from_amount: u128 = req.from_amount.parse().unwrap_or(0);
 
     // Fusion+ resolver competition typically yields good rates
-    let amount_out = from_amount * 985 / 1000; // 1.5% total cost
+    let amount_out = from_amount.checked_mul(985).unwrap_or(0) / 1000; // 1.5% total cost
 
     Ok(SingleQuote {
         protocol: "1inch-fusion".to_string(),

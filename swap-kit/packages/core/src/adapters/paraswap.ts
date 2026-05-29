@@ -94,8 +94,9 @@ export class ParaswapAdapter implements ISwapAdapter {
         routeData: {
           type:       "paraswap",
           priceRoute: priceData.priceRoute,
-          calldata:   "0x" as Hex,  // filled during execute via buildTx
-        },
+          calldata:   "0x" as Hex,
+          slippageBps: intent.maxSlippageBps,
+        } as any,
         validUntil: Math.floor(Date.now() / 1000) + 60,
       };
     } catch (error: any) {
@@ -119,7 +120,8 @@ export class ParaswapAdapter implements ISwapAdapter {
       chainId,
       routeData.priceRoute,
       userAddress,
-      quote.amountOut
+      quote.amountOut,
+      (routeData as any).slippageBps || 50
     );
 
     // Get balance before
@@ -241,6 +243,7 @@ export class ParaswapAdapter implements ISwapAdapter {
     priceRoute: unknown,
     userAddress: Address,
     destAmount: bigint,
+    slippageBps: number
   ): Promise<ParaswapTxResponse> {
     const response = await fetch(`${PARASWAP_API}/transactions/${chainId}`, {
       method: "POST",
@@ -253,7 +256,7 @@ export class ParaswapAdapter implements ISwapAdapter {
         priceRoute,
         userAddress,
         partner:     "swap-kit",
-        slippage:    50,  // 0.5% — matches default
+        slippage:    slippageBps,
       }),
       signal: AbortSignal.timeout(5000),
     });

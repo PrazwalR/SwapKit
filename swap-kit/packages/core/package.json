@@ -1,6 +1,6 @@
 {
   "name": "@swap-kit/core",
-  "version": "0.1.1",
+  "version": "0.1.8",
   "type": "module",
   "description": "Intent-Based DeFi SDK — unified swap routing across Uniswap V4, 1inch Fusion+, and Paraswap with MEV protection",
   "main": "./dist/index.cjs",
