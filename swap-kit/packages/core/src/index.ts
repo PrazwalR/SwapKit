@@ -8,6 +8,7 @@ import { OneInchFusionAdapter } from "./adapters/one-inch.js";
 import { ParaswapAdapter } from "./adapters/paraswap.js";
 import type { ISwapAdapter } from "./adapters/base.js";
 import type { WalletClient, PublicClient } from "viem";
+import { registerCustomChains } from "./utils/chain.js";
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -18,6 +19,8 @@ export interface SwapKitConfig {
   rustEngineUrl?: string;
   /** Fail silently if MEV engine is unreachable. Default: true */
   mevFailOpen?: boolean;
+  /** Optional custom chains to inject into the global chain registry */
+  customChains?: any[];
 }
 
 // ─── Main SDK Class ───────────────────────────────────────────────────────────
@@ -29,6 +32,10 @@ export class SwapKit {
   private mevGuard: MEVGuard;
 
   constructor(config: SwapKitConfig) {
+    if (config.customChains && config.customChains.length > 0) {
+      registerCustomChains(config.customChains);
+    }
+
     this.adapters = [
       new UniswapV4Adapter(),
       new OneInchFusionAdapter(config.oneInchApiKey),
@@ -198,6 +205,7 @@ export {
   getPublicClient,
   getTxExplorerUrl,
   getAddressExplorerUrl,
+  registerCustomChains,
 } from "./utils/chain.js";
 
 export {

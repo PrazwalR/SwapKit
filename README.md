@@ -357,6 +357,7 @@ const sdk = createSwapKit({
   oneInchApiKey: string,         // Your 1inch API key (pass "" to skip)
   rustEngineUrl?: string,        // URL of the Rust MEV engine (optional)
   mevFailOpen?: boolean,         // If true, skip MEV check when engine is down (default: true)
+  customChains?: ChainConfig[],  // Dynamically inject unsupported or new chains (e.g. Avalanche)
 });
 ```
 
@@ -609,13 +610,19 @@ No. Without the Rust engine, SwapKit uses static slippage values (e.g., 0.5%). W
 
 ### What chains are supported?
 
+SwapKit supports **ANY EVM chain in existence** dynamically! If you want to use an obscure L2 or new chain, simply inject it into the `customChains` array during SDK initialization.
+
+By default, out-of-the-box, we natively provide RPCs and block explorers for these 7 chains:
+
 | Chain | Chain ID | Uniswap V4 | 1inch | Paraswap |
 |-------|----------|------------|-------|----------|
 | Ethereum | 1 | ✅ | ✅ | ✅ |
 | Base | 8453 | ✅ | ✅ | ✅ |
 | Arbitrum | 42161 | ✅ | ✅ | ✅ |
+| Optimism | 10 | ❌ | ✅ | ✅ |
 | Polygon | 137 | ❌ | ✅ | ✅ |
 | BNB Chain | 56 | ❌ | ✅ | ✅ |
+| Sepolia | 11155111 | ❌ | ❌ | ❌ (Custom Testnet RPCs) |
 
 ### What is "Flashbots Protect"?
 

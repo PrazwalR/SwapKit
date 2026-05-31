@@ -1,5 +1,5 @@
 import { createPublicClient, http, type PublicClient, type Chain } from "viem";
-import { mainnet, base, arbitrum, optimism, polygon, bsc } from "viem/chains";
+import { mainnet, base, arbitrum, optimism, polygon, bsc, sepolia } from "viem/chains";
 
 // ─── Chain Registry ─────────────────────────────────────────────────────────
 
@@ -63,21 +63,50 @@ const CHAIN_CONFIGS: Record<number, ChainConfig> = {
     blockTime:         3,
     confirmations:     5,
   },
+  11155111: {
+    chain:             sepolia,
+    rpcUrl:            "https://rpc.sepolia.org",
+    blockExplorerUrl:  "https://sepolia.etherscan.io",
+    nativeSymbol:      "ETH",
+    blockTime:         12,
+    confirmations:     2,
+  },
 };
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
  * Returns the chain configuration for a given chain ID.
+ * Falls back to a dynamic minimal config if the chain is unlisted.
  */
 export function getChainConfig(chainId: number): ChainConfig {
   const config = CHAIN_CONFIGS[chainId];
-  if (!config) {
-    throw new Error(
-      `Unsupported chain ID: ${chainId}. Supported: ${Object.keys(CHAIN_CONFIGS).join(", ")}`
-    );
+  if (config) return config;
+
+  // Dynamic fallback for unknown chains (relies on user providing a publicClient later)
+  return {
+    chain: {
+      id: chainId,
+      name: `Chain ${chainId}`,
+      network: `chain-${chainId}`,
+      nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+      rpcUrls: { default: { http: ["https://cloudflare-eth.com"] }, public: { http: ["https://cloudflare-eth.com"] } },
+    } as any,
+    rpcUrl: "https://cloudflare-eth.com",
+    blockExplorerUrl: "https://etherscan.io",
+    nativeSymbol: "ETH",
+    blockTime: 12, // Safe generic default
+    confirmations: 2,
+  };
+}
+
+/**
+ * Register custom user-injected chains into the global registry.
+ */
+export function registerCustomChains(chains: ChainConfig[]) {
+  for (const chain of chains) {
+    CHAIN_CONFIGS[chain.chain.id] = chain;
   }
-  return config;
 }
 
 /**

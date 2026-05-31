@@ -53,7 +53,7 @@ export async function getTokenSymbol(
 ): Promise<string> {
   if (isNativeToken(address)) {
     // Return chain-appropriate native token name
-    const chainId = publicClient.chain?.id ?? 1;
+    const chainId = publicClient.chain?.id ?? 0;
     const nativeSymbols: Record<number, string> = {
       1: "ETH", 8453: "ETH", 42161: "ETH", 10: "ETH",
       137: "MATIC", 56: "BNB",

@@ -103,11 +103,7 @@ export class UniswapV4Adapter implements ISwapAdapter {
   readonly protocol = "uniswap-v4" as const;
 
   supports(intent: Required<SwapIntent>): boolean {
-    const supported = [1, 8453, 42161];
-    return (
-      supported.includes(intent.fromChainId) &&
-      intent.fromChainId === intent.toChainId // v4 is single-chain
-    );
+    return intent.fromChainId === intent.toChainId && !!UNISWAP_V4_ADDRESSES[intent.fromChainId];
   }
 
   async quote(intent: Required<SwapIntent>): Promise<QuoteResult> {
