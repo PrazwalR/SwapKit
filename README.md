@@ -574,9 +574,35 @@ The Rust engine has 4 endpoints.
    - Request body: `{ from_token, to_token, from_amount, chain_id, protocol, amount_out, slippage_bps }`
 
 4. **POST /mine** — CREATE2 vanity address mining for Uniswap V4 hooks:
-   - Finds salt values that produce addresses with a specific prefix
-   - Max 10M iterations hard cap
-   - 30-second timeout
+   In Uniswap V4, the starting characters of a Hook's contract address dictate what permissions the Hook has (e.g., an address starting with `0x40...` vs `0x00...`). If you want "BeforeSwap" permissions, you must deploy to a specific prefix. This endpoint brute-forces that deployment salt for you.
+   
+   **How it works:**
+   - **Step 1: The Request:** A developer sends a payload (`deployer`, `init_code_hash`, `prefix`).
+   - **Step 2: Concurrent Mining:** The engine spins up a highly optimized multi-threaded task using `rayon`, utilizing all available CPU cores.
+   - **Step 3: Keccak256 Brute-forcing:** It generates random salt values and hashes them to find the target Ethereum address. 
+     *(e.g., Attempt 1: 0x91... Fail ❌ → Attempt 84,302: 0x40... Success! ✅)*
+   - **Step 4: Safe Concurrency:** To prevent server DoS during this intense CPU work, the engine uses a `Semaphore` (max 2 simultaneous jobs) and a 30-second timeout. Once the matching salt is found, it immediately halts all threads and returns the winning salt.
+   
+   **How to use it:**
+   Run the engine locally (it runs on port 3030 by default), then send a POST request with your hook's deployment parameters:
+   ```bash
+   curl -X POST http://localhost:3030/mine \
+     -H "Content-Type: application/json" \
+     -d '{
+       "deployer": "0xYourWalletAddress",
+       "init_code_hash": "0xYourCompiledBytecodeHash",
+       "prefix": "40"
+     }'
+   ```
+   *Response:*
+   ```json
+   {
+     "salt": "0x000000000000000000000000000000000000000000000000000000000001494e",
+     "address": "0x40a9...138d",
+     "attempts": 84302,
+     "found": true
+   }
+   ```
 
 ### TypeScript SDK Architecture
 The SDK has these modules:
