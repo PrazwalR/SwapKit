@@ -53,6 +53,9 @@ export interface UniswapV4RouteData {
   hookData: Hex;
   sqrtPriceLimitX96: bigint;
   calldata: Hex; // pre-encoded UniversalRouter calldata
+  fromAmount: bigint;  // Original input amount (for native ETH value)
+  fromToken: string;   // Source token address (for balance measurement)
+  toToken: string;     // Destination token address (for balance measurement)
 }
 
 export interface OneInchRouteData {

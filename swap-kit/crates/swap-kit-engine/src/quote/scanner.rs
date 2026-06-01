@@ -1,21 +1,40 @@
 //! Parallel Quote Scanner
 //!
-//! Fetches quotes from multiple on-chain sources in parallel using tokio.
-//! In production, this would make actual RPC calls to Uniswap V4 Quoter,
-//! Paraswap API, and 1inch Fusion+ API.
+//! This module provides a placeholder quote scanning endpoint.
+//! 
+//! **IMPORTANT**: The Rust engine's `/quote` endpoint is a lightweight scaffold.
+//! Real quote fetching is handled by the TypeScript SDK (`@swap-kit/core`),
+//! which makes actual API calls to Paraswap, 1inch, and on-chain RPC calls
+//! to the Uniswap V4 QuoterV2 contract. 
+//!
+//! The Rust engine's primary purpose is MEV simulation (`/simulate`) and
+//! CREATE2 vanity address mining (`/mine`).
 
 use anyhow::Result;
 use swap_kit_types::{QuoteRequest, QuoteResponse, SingleQuote};
 
 /// Fetch quotes from all supported protocols in parallel.
 ///
+/// **NOTE**: This endpoint returns heuristic estimates, NOT real market data.
+/// For production quotes, use the TypeScript SDK (`@swap-kit/core`) which
+/// calls real APIs (Paraswap REST, 1inch REST, Uniswap V4 on-chain QuoterV2).
+///
+/// The estimates here are useful ONLY for:
+/// - Testing the engine's HTTP infrastructure
+/// - Providing rough order-of-magnitude estimates when the TS SDK is unavailable
+///
 /// Returns quotes sorted by amount_out descending (best first).
 pub async fn get_best_quote(req: &QuoteRequest) -> Result<QuoteResponse> {
+    let from_amount: u128 = req
+        .from_amount
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid from_amount: must be a positive integer within u128 bounds"))?;
+
     // Fan out to all protocols in parallel
     let (uniswap, paraswap, oneinch) = tokio::join!(
-        quote_uniswap_v4(req),
-        quote_paraswap(req),
-        quote_1inch_fusion(req),
+        estimate_uniswap_v4(from_amount),
+        estimate_paraswap(from_amount),
+        estimate_1inch_fusion(from_amount),
     );
 
     let mut quotes = Vec::new();
@@ -40,18 +59,13 @@ pub async fn get_best_quote(req: &QuoteRequest) -> Result<QuoteResponse> {
     Ok(QuoteResponse { quotes })
 }
 
-/// Simulate a Uniswap V4 quote.
+/// Heuristic Uniswap V4 estimate.
 ///
-/// In production: call QuoterV2.quoteExactInputSingle() via RPC.
-async fn quote_uniswap_v4(req: &QuoteRequest) -> Result<SingleQuote> {
-    let from_amount: u128 = req.from_amount.parse().unwrap_or(0);
-
-    // Uniswap V4 typically offers ~0.3% fee for major pairs
-    // Simulate 98% output (2% price impact + fees)
+/// **NOT a real quote.** Assumes ~2% total cost (fees + price impact).
+/// Real V4 quotes come from the TypeScript SDK's on-chain QuoterV2 call.
+async fn estimate_uniswap_v4(from_amount: u128) -> Result<SingleQuote> {
     let amount_out = from_amount.checked_mul(98).unwrap_or(0) / 100;
-
-    // V4 gas is ~130k due to singleton + flash accounting
-    let gas_cost = 130_000u128.checked_mul(2_000_000_000).unwrap_or(0); // 130k gas @ 2 gwei
+    let gas_cost = 130_000u128.checked_mul(2_000_000_000).unwrap_or(0);
 
     Ok(SingleQuote {
         protocol: "uniswap-v4".to_string(),
@@ -61,16 +75,12 @@ async fn quote_uniswap_v4(req: &QuoteRequest) -> Result<SingleQuote> {
     })
 }
 
-/// Simulate a Paraswap quote.
+/// Heuristic Paraswap estimate.
 ///
-/// In production: call Paraswap REST API at apiv5.paraswap.io/prices
-async fn quote_paraswap(req: &QuoteRequest) -> Result<SingleQuote> {
-    let from_amount: u128 = req.from_amount.parse().unwrap_or(0);
-
-    // Paraswap aggregates multiple DEXs, typically gets slightly better rates
-    let amount_out = from_amount.checked_mul(97).unwrap_or(0) / 100; // 3% total cost
-
-    // Paraswap gas varies but typically ~150k
+/// **NOT a real quote.** Assumes ~3% total cost.
+/// Real Paraswap quotes come from the TypeScript SDK's call to apiv5.paraswap.io.
+async fn estimate_paraswap(from_amount: u128) -> Result<SingleQuote> {
+    let amount_out = from_amount.checked_mul(97).unwrap_or(0) / 100;
     let gas_cost = 150_000u128.checked_mul(2_000_000_000).unwrap_or(0);
 
     Ok(SingleQuote {
@@ -81,20 +91,17 @@ async fn quote_paraswap(req: &QuoteRequest) -> Result<SingleQuote> {
     })
 }
 
-/// Simulate a 1inch Fusion+ quote.
+/// Heuristic 1inch Fusion+ estimate.
 ///
-/// In production: call 1inch Fusion+ API.
-/// Fusion+ is gasless for the user (resolvers pay gas).
-async fn quote_1inch_fusion(req: &QuoteRequest) -> Result<SingleQuote> {
-    let from_amount: u128 = req.from_amount.parse().unwrap_or(0);
-
-    // Fusion+ resolver competition typically yields good rates
-    let amount_out = from_amount.checked_mul(985).unwrap_or(0) / 1000; // 1.5% total cost
+/// **NOT a real quote.** Assumes ~1.5% total cost.
+/// Real 1inch quotes come from the TypeScript SDK's call to api.1inch.dev.
+async fn estimate_1inch_fusion(from_amount: u128) -> Result<SingleQuote> {
+    let amount_out = from_amount.checked_mul(985).unwrap_or(0) / 1000;
 
     Ok(SingleQuote {
         protocol: "1inch-fusion".to_string(),
         amount_out: amount_out.to_string(),
-        gas_cost_wei: "0".to_string(), // Gasless for user
+        gas_cost_wei: "0".to_string(),
         price_impact_bps: 20,
     })
 }
@@ -119,5 +126,17 @@ mod tests {
         let first_out: u128 = result.quotes[0].amount_out.parse().unwrap();
         let last_out: u128 = result.quotes[2].amount_out.parse().unwrap();
         assert!(first_out >= last_out);
+    }
+
+    #[tokio::test]
+    async fn test_invalid_amount_returns_error() {
+        let req = QuoteRequest {
+            from_token: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(),
+            to_token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string(),
+            from_amount: "not_a_number".to_string(),
+            chain_id: 1,
+        };
+        let result = get_best_quote(&req).await;
+        assert!(result.is_err());
     }
 }

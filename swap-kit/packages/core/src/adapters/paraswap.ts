@@ -68,12 +68,16 @@ export class ParaswapAdapter implements ISwapAdapter {
       const amountOut = BigInt(priceData.priceRoute.destAmount);
 
       // MEDIUM-7 fix: Paraswap API returns gas cost in units, not Wei. We need gasPrice.
-      let gasPrice = 20_000_000_000n;
+      const chainFallbackGas: Record<number, bigint> = {
+        1: 20_000_000_000n, 8453: 10_000_000n, 42161: 100_000_000n,
+        10: 10_000_000n, 137: 30_000_000_000n, 56: 3_000_000_000n,
+      };
+      let gasPrice = chainFallbackGas[intent.fromChainId] ?? 20_000_000_000n;
       try {
         const client = getPublicClient(intent.fromChainId);
         gasPrice = await client.getGasPrice();
-      } catch (e) {
-        // Fallback
+      } catch {
+        // Use chain-aware fallback
       }
       const gasCostWei = BigInt(priceData.priceRoute.gasCost || "0") * gasPrice;
 

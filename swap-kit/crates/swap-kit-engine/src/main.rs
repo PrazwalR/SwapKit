@@ -3,16 +3,19 @@
 //! # Endpoints
 //!
 //! - `GET  /health`    — Health check
-//! - `POST /simulate`  — MEV sandwich attack simulation
-//! - `POST /quote`     — Multi-protocol quote aggregation
+//! - `POST /simulate`  — MEV sandwich attack simulation (heuristic-based)
+//! - `POST /quote`     — Heuristic quote estimates (real quotes via TypeScript SDK)
 //! - `POST /mine`      — CREATE2 vanity address mining for Uniswap V4 hooks
 
 use axum::{
     extract::Json,
+    http::StatusCode,
+    response::IntoResponse,
     routing::{get, post},
     Router,
 };
 use std::net::SocketAddr;
+use std::time::Duration;
 use tower_http::cors::{CorsLayer, Any};
 use tracing_subscriber::EnvFilter;
 
@@ -21,7 +24,7 @@ mod quote;
 mod mining;
 
 use swap_kit_types::{
-    MineRequest, MineResult, QuoteRequest, QuoteResponse, SimulateRequest, SimulateResponse,
+    MineRequest, MineResult, QuoteRequest, QuoteResponse, SimulateRequest,
 };
 
 #[tokio::main]
@@ -33,20 +36,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .init();
 
-    // Secure CORS for typical local and staging domains instead of permissive
-    let cors = CorsLayer::new()
-        .allow_origin(Any) // Restrict this to specific domains in production
-        .allow_methods(Any)
-        .allow_headers(Any);
+    // CORS: configurable via CORS_ORIGIN env var, defaults to permissive for local dev
+    let cors_origin = std::env::var("CORS_ORIGIN").unwrap_or_else(|_| "*".to_string());
+    let cors = if cors_origin == "*" {
+        tracing::warn!("CORS is set to allow ALL origins. Set CORS_ORIGIN env var for production.");
+        CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any)
+    } else {
+        tracing::info!("CORS restricted to: {}", cors_origin);
+        CorsLayer::new()
+            .allow_origin(cors_origin.parse::<axum::http::HeaderValue>().expect("Invalid CORS_ORIGIN"))
+            .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+            .allow_headers([axum::http::header::CONTENT_TYPE])
+    };
+
+    // Body size limit: 64KB max (largest valid request is ~500 bytes)
+    let body_limit = axum::extract::DefaultBodyLimit::max(65_536);
 
     let app = Router::new()
         .route("/health", get(health))
         .route("/simulate", post(simulate_mev))
         .route("/quote", post(get_quote))
         .route("/mine", post(mine_hook_address))
-        .layer(cors);
+        .layer(cors)
+        .layer(body_limit);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3030));
+    // Bind address: configurable via BIND_ADDR env var, defaults to 127.0.0.1 for safety
+    let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:3030".to_string());
+    let addr: SocketAddr = bind_addr.parse().expect("Invalid BIND_ADDR");
     tracing::info!("swap-kit-engine listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -59,32 +78,55 @@ async fn health() -> &'static str {
     "ok"
 }
 
-async fn simulate_mev(Json(req): Json<SimulateRequest>) -> Json<SimulateResponse> {
-    let report = mev::simulator::simulate(&req)
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!("MEV simulation failed: {e}, returning safe default");
-            mev::simulator::safe_default()
-        });
-    Json(report)
+async fn simulate_mev(Json(req): Json<SimulateRequest>) -> impl IntoResponse {
+    match mev::simulator::simulate(&req).await {
+        Ok(report) => (StatusCode::OK, Json(report)).into_response(),
+        Err(e) => {
+            tracing::warn!("MEV simulation failed: {e}, returning unknown-risk default");
+            (StatusCode::OK, Json(mev::simulator::safe_default())).into_response()
+        }
+    }
 }
 
-async fn get_quote(Json(req): Json<QuoteRequest>) -> Json<QuoteResponse> {
-    let quotes = quote::scanner::get_best_quote(&req)
-        .await
-        .unwrap_or_default();
-    Json(quotes)
+async fn get_quote(Json(req): Json<QuoteRequest>) -> impl IntoResponse {
+    match quote::scanner::get_best_quote(&req).await {
+        Ok(quotes) => (StatusCode::OK, Json(quotes)).into_response(),
+        Err(e) => {
+            tracing::error!("Quote fetch failed: {e}");
+            let error_response = QuoteResponse { quotes: vec![] };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response)).into_response()
+        }
+    }
 }
 
-async fn mine_hook_address(Json(req): Json<MineRequest>) -> Json<MineResult> {
-    // Run mining in a blocking thread to avoid blocking the async runtime
-    let result = tokio::task::spawn_blocking(move || mining::hook_miner::mine(req))
-        .await
-        .unwrap_or_else(|_e| MineResult {
-            salt: String::new(),
-            address: String::new(),
-            attempts: 0,
-            found: false,
-        });
-    Json(result)
+async fn mine_hook_address(Json(req): Json<MineRequest>) -> impl IntoResponse {
+    // Run mining in a blocking thread with a 30-second timeout to prevent DoS
+    let result = tokio::time::timeout(
+        Duration::from_secs(30),
+        tokio::task::spawn_blocking(move || mining::hook_miner::mine(req)),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(mine_result)) => (StatusCode::OK, Json(mine_result)).into_response(),
+        Ok(Err(_join_err)) => {
+            let fallback = MineResult {
+                salt: String::new(),
+                address: String::new(),
+                attempts: 0,
+                found: false,
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(fallback)).into_response()
+        }
+        Err(_timeout) => {
+            tracing::warn!("Mining request timed out after 30s");
+            let fallback = MineResult {
+                salt: String::new(),
+                address: String::new(),
+                attempts: 0,
+                found: false,
+            };
+            (StatusCode::REQUEST_TIMEOUT, Json(fallback)).into_response()
+        }
+    }
 }

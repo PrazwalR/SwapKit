@@ -10,6 +10,8 @@ import {
 } from "viem";
 import { mainnet, base, arbitrum } from "viem/chains";
 import { UniversalRouterABI } from "../abis/index.js";
+import { isNativeToken } from "../utils/token.js";
+import { ERC20ABI } from "../abis/index.js";
 import type { ISwapAdapter } from "./base.js";
 import type {
   SwapIntent,
@@ -160,6 +162,9 @@ export class UniswapV4Adapter implements ISwapAdapter {
         hookData:          "0x",
         sqrtPriceLimitX96: 0n,
         calldata,
+        fromAmount:        intent.fromAmount, // Carry input amount for native ETH value
+        fromToken:         intent.fromToken,  // Carry tokens for balance measurement
+        toToken:           intent.toToken,
       },
       validUntil: Math.floor(Date.now() / 1000) + 30,
     };
@@ -170,28 +175,58 @@ export class UniswapV4Adapter implements ISwapAdapter {
     walletClient: WalletClient,
     publicClient: PublicClient
   ): Promise<SwapResult> {
-    const routeData = quote.routeData as UniswapV4RouteData;
+    const routeData = quote.routeData as any;
     const addrs = UNISWAP_V4_ADDRESSES[walletClient.chain!.id];
+    const userAddress = walletClient.account!.address;
 
-    const isNativeIn = this.isNativeETH(routeData.poolKey.currency0) || this.isNativeETH(routeData.poolKey.currency1);
-    const value = isNativeIn ? (quote as any).originalAmountIn || 0n : 0n;
+    // Determine if input token is native ETH — use the actual fromAmount, not a missing field
+    const fromToken = routeData.fromToken as string ?? "";
+    const toToken = routeData.toToken as string ?? "";
+    const isNativeIn = this.isNativeETH(fromToken as Address);
+    const value = isNativeIn ? BigInt(routeData.fromAmount ?? 0) : 0n;
+
+    // Measure balance BEFORE swap for accurate output measurement
+    const isDstNative = this.isNativeETH(toToken as Address);
+    const balanceBefore = isDstNative
+      ? await publicClient.getBalance({ address: userAddress })
+      : await publicClient.readContract({
+          address: toToken as Address,
+          abi: ERC20ABI,
+          functionName: "balanceOf",
+          args: [userAddress],
+        }) as bigint;
 
     const txHash = await walletClient.sendTransaction({
       account: walletClient.account!,
       chain:   walletClient.chain!,
       to:      addrs.universalRouter,
       data:    routeData.calldata,
-      value:   value,
+      value,
     });
 
     const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
 
+    // Measure balance AFTER swap
+    const balanceAfter = isDstNative
+      ? await publicClient.getBalance({ address: userAddress })
+      : await publicClient.readContract({
+          address: toToken as Address,
+          abi: ERC20ABI,
+          functionName: "balanceOf",
+          args: [userAddress],
+        }) as bigint;
+
+    const actualAmountOut = balanceAfter - balanceBefore;
+    const mevExtractedWei = quote.amountOut > actualAmountOut
+      ? quote.amountOut - actualAmountOut
+      : 0n;
+
     return {
       txHash,
       protocol:          "uniswap-v4",
-      actualAmountOut:   quote.amountOut,
+      actualAmountOut,
       gasPaidWei:        receipt.gasUsed * receipt.effectiveGasPrice,
-      mevExtractedWei:   0n,
+      mevExtractedWei,
       route:             quote,
       confirmedAt:       Math.floor(Date.now() / 1000),
     };
@@ -366,13 +401,21 @@ export class UniswapV4Adapter implements ISwapAdapter {
 
   private async estimateGas(client: any, _calldata: Hex): Promise<bigint> {
     try {
-      // CRITICAL-1: Fetch actual real-time gas price from the network instead of hardcoding 20 gwei
       const gasPrice = await client.getGasPrice();
       // Uniswap V4 swaps take roughly 150k-200k gas depending on tick crossing
       return gasPrice * 180_000n;
     } catch {
-      // Fallback if RPC getGasPrice fails
-      return 180_000n * 20_000_000_000n; // 20 gwei
+      // Chain-aware fallback gas prices
+      const chainId = client.chain?.id ?? 1;
+      const fallbackGwei: Record<number, bigint> = {
+        1:     20_000_000_000n,   // Ethereum: ~20 gwei
+        8453:  10_000_000n,       // Base: ~0.01 gwei
+        42161: 100_000_000n,      // Arbitrum: ~0.1 gwei
+        10:    10_000_000n,       // Optimism: ~0.01 gwei
+        137:   30_000_000_000n,   // Polygon: ~30 gwei
+        56:    3_000_000_000n,    // BSC: ~3 gwei
+      };
+      return 180_000n * (fallbackGwei[chainId] ?? 20_000_000_000n);
     }
   }
 

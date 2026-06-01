@@ -57,12 +57,17 @@ export class OneInchFusionAdapter implements ISwapAdapter {
       throw new Error("1inch returned zero output amount — no route found");
     }
 
-    let gasPrice = 20_000_000_000n;
+    // Fetch real gas price, with chain-aware fallback
+    const chainFallbackGas: Record<number, bigint> = {
+      1: 20_000_000_000n, 8453: 10_000_000n, 42161: 100_000_000n,
+      10: 10_000_000n, 137: 30_000_000_000n, 56: 3_000_000_000n,
+    };
+    let gasPrice = chainFallbackGas[intent.fromChainId] ?? 20_000_000_000n;
     try {
       const client = getPublicClient(intent.fromChainId);
       gasPrice = await client.getGasPrice();
-    } catch (e) {
-      // Fallback
+    } catch {
+      // Use chain-aware fallback
     }
     const estimatedGas = data.estimatedGas ? BigInt(data.estimatedGas) * gasPrice : 0n;
 

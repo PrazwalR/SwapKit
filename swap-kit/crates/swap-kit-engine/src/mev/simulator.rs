@@ -72,11 +72,13 @@ pub async fn simulate(req: &SimulateRequest) -> Result<SimulateResponse> {
 }
 
 /// Returns a safe default response when simulation fails.
+/// Returns "unknown" risk to honestly signal the simulation could not complete,
+/// rather than misleadingly reporting "low" risk.
 pub fn safe_default() -> SimulateResponse {
     SimulateResponse {
-        sandwich_risk: "low".to_string(),
+        sandwich_risk: "unknown".to_string(),
         estimated_mev_wei: "0".to_string(),
-        recommended_slippage_bps: 50,
+        recommended_slippage_bps: 30, // Conservative default when we can't analyze
         detected_bots: vec![],
     }
 }
@@ -139,8 +141,9 @@ mod tests {
     #[test]
     fn test_safe_default() {
         let result = safe_default();
-        assert_eq!(result.sandwich_risk, "low");
+        assert_eq!(result.sandwich_risk, "unknown");
         assert_eq!(result.estimated_mev_wei, "0");
+        assert_eq!(result.recommended_slippage_bps, 30);
     }
 
     #[tokio::test]

@@ -135,12 +135,23 @@ export function getPublicClient(
   rpcUrl?: string
 ): PublicClient {
   const config = getChainConfig(chainId);
+  const alchemyKey = process.env.ALCHEMY_API_KEY;
+  const alchemyUrl = alchemyKey
+    ? {
+        1: `https://eth-mainnet.alchemyapi.io/v2/${alchemyKey}`,
+        8453: `https://base-mainnet.g.alchemy.com/v2/${alchemyKey}`,
+        42161: `https://arb-mainnet.g.alchemy.com/v2/${alchemyKey}`,
+        10: `https://opt-mainnet.g.alchemy.com/v2/${alchemyKey}`,
+        137: `https://polygon-mainnet.g.alchemy.com/v2/${alchemyKey}`,
+        56: `https://bsc-mainnet.g.alchemy.com/v2/${alchemyKey}`,
+      }[chainId]
+    : undefined;
   const envOverrides: Record<number, string | undefined> = {
     1: process.env.RPC_ETHEREUM,
     8453: process.env.RPC_BASE,
     42161: process.env.RPC_ARBITRUM,
   };
-  const url = rpcUrl ?? envOverrides[chainId] ?? config.rpcUrl;
+  const url = rpcUrl ?? alchemyUrl ?? envOverrides[chainId] ?? config.rpcUrl;
   const cacheKey = `${chainId}:${url}`;
 
   const cached = clientCache.get(cacheKey);
