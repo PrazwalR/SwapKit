@@ -2,7 +2,7 @@ import type { SwapIntent, QuoteResult, SwapProtocol } from "../types.js";
 import type { ISwapAdapter } from "../adapters/base.js";
 
 export interface QuoteEngineConfig {
-  /** Timeout per adapter in ms. Default: 5000 */
+  /** Timeout per adapter in ms. Default: 15000 */
   timeoutMs?: number;
   /** Minimum number of successful quotes before returning. Default: 1 */
   minQuotes?: number;

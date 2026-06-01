@@ -89,7 +89,7 @@ const QUOTER_ABI = [
     outputs: [
       { name: "amountOut",      type: "int128[]" },
       { name: "sqrtPriceX96After", type: "uint160[]" },
-      { name: "initializedTicksCrossed", type: "uint32[]" },
+      { name: "initializedTicksCrossed", type: "uint32" },
     ],
   },
 ] as const;
@@ -122,7 +122,7 @@ export class UniswapV4Adapter implements ISwapAdapter {
     for (const fee of fees) {
       const poolKey = this.buildPoolKey(intent.fromToken as Address, intent.toToken as Address, fee);
       try {
-        const amountOut = await this.getQuoteExact(client, poolKey, intent.fromAmount, addrs.quoter);
+        const amountOut = await this.getQuoteExact(client, poolKey, intent.fromAmount, addrs.quoter, intent.fromToken as Address);
         if (amountOut > bestAmountOut) {
           bestAmountOut = amountOut;
           bestPoolKey = poolKey;
@@ -137,13 +137,19 @@ export class UniswapV4Adapter implements ISwapAdapter {
       throw new Error(`No Uniswap V4 pool found with sufficient liquidity for this pair`);
     }
 
+    const fromNormalized = this.isNativeETH(intent.fromToken as Address)
+      ? "0x0000000000000000000000000000000000000000" as Address
+      : intent.fromToken as Address;
+    const zeroForOne = fromNormalized.toLowerCase() === bestPoolKey.currency0.toLowerCase();
+
     const calldata = this.encodeSwapCalldata(
       bestPoolKey,
       intent.fromAmount,
       bestAmountOut,
       intent.maxSlippageBps,
       intent.recipient,
-      intent.deadline
+      intent.deadline,
+      zeroForOne
     );
 
     const gasCostWei = await this.estimateGas(client, calldata);
@@ -154,7 +160,7 @@ export class UniswapV4Adapter implements ISwapAdapter {
       amountOut:      bestAmountOut,
       gasCostWei,
       mevExposure:    0n,
-      netAmountOut:   bestAmountOut > gasCostWei ? bestAmountOut - gasCostWei : 0n,
+      netAmountOut:   bestAmountOut,
       priceImpactBps,
       routeData: {
         type:              "uniswap-v4",
@@ -255,9 +261,13 @@ export class UniswapV4Adapter implements ISwapAdapter {
     client: any,
     poolKey: PoolKey,
     amountIn: bigint,
-    quoterAddr: Address
+    quoterAddr: Address,
+    fromToken: Address
   ): Promise<bigint> {
-    const zeroForOne = BigInt(poolKey.currency0) < BigInt(poolKey.currency1);
+    const fromNormalized = this.isNativeETH(fromToken)
+      ? "0x0000000000000000000000000000000000000000" as Address
+      : fromToken;
+    const zeroForOne = fromNormalized.toLowerCase() === poolKey.currency0.toLowerCase();
 
     const result = await client.simulateContract({
       address: quoterAddr,
@@ -332,9 +342,12 @@ export class UniswapV4Adapter implements ISwapAdapter {
     amountOut: bigint,
     slippageBps: number,
     recipient: Address,
-    deadline: number
+    deadline: number,
+    zeroForOne: boolean
   ): Hex {
     const minOut = amountOut * BigInt(10000 - slippageBps) / 10000n;
+    const settleCurrency = zeroForOne ? poolKey.currency0 : poolKey.currency1;
+    const takeCurrency = zeroForOne ? poolKey.currency1 : poolKey.currency0;
 
     // Encode exact input single params
     const exactInputSingleParams = encodeAbiParameters(
@@ -361,7 +374,7 @@ export class UniswapV4Adapter implements ISwapAdapter {
           tickSpacing: poolKey.tickSpacing,
           hooks:       poolKey.hooks,
         },
-        zeroForOne:        BigInt(poolKey.currency0) < BigInt(poolKey.currency1),
+        zeroForOne,
         amountIn:          amountIn,
         amountOutMinimum:  minOut,
         hookData:          "0x",
@@ -371,12 +384,12 @@ export class UniswapV4Adapter implements ISwapAdapter {
     // Encode settle and take
     const settleParams = encodeAbiParameters(
       [{ type: "address" }, { type: "uint256" }],
-      [poolKey.currency0, amountIn]
+      [settleCurrency, amountIn]
     );
 
     const takeParams = encodeAbiParameters(
       [{ type: "address" }, { type: "uint256" }],
-      [poolKey.currency1, minOut]
+      [takeCurrency, minOut]
     );
 
     // Actions

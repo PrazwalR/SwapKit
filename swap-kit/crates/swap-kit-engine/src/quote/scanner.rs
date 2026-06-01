@@ -30,6 +30,10 @@ pub async fn get_best_quote(req: &QuoteRequest) -> Result<QuoteResponse> {
         .parse()
         .map_err(|_| anyhow::anyhow!("Invalid from_amount: must be a positive integer within u128 bounds"))?;
 
+    if from_amount == 0 {
+        return Err(anyhow::anyhow!("from_amount must be greater than zero"));
+    }
+
     // Fan out to all protocols in parallel
     let (uniswap, paraswap, oneinch) = tokio::join!(
         estimate_uniswap_v4(from_amount),
@@ -134,6 +138,18 @@ mod tests {
             from_token: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(),
             to_token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string(),
             from_amount: "not_a_number".to_string(),
+            chain_id: 1,
+        };
+        let result = get_best_quote(&req).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_zero_amount_returns_error() {
+        let req = QuoteRequest {
+            from_token: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(),
+            to_token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string(),
+            from_amount: "0".to_string(),
             chain_id: 1,
         };
         let result = get_best_quote(&req).await;

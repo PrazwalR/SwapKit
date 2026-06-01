@@ -23,15 +23,16 @@
 //! - Bit 7 (0x80): AFTER_SWAP
 
 use rayon::prelude::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 use swap_kit_types::{MineRequest, MineResult};
 use tiny_keccak::{Hasher, Keccak};
 
-/// Mine a CREATE2 salt that produces an address with the desired prefix.
+/// Mine a CREATE2 salt with cancellation support.
 ///
 /// Uses rayon for parallel computation across all available CPU cores.
-/// Returns the first salt found that matches, or reports no match after
-/// max_iterations attempts.
-pub fn mine(req: MineRequest) -> MineResult {
+/// Accepts an `AtomicBool` cancellation token that is checked each iteration
+/// to allow early termination (e.g. on timeout).
+pub fn mine_cancellable(req: MineRequest, cancel: &AtomicBool) -> MineResult {
     let requested_iters = req.max_iterations.unwrap_or(1_000_000);
     // Hard cap at 10M to prevent CPU starvation / DoS attacks
     let max_iterations = std::cmp::min(requested_iters, 10_000_000);
@@ -72,6 +73,11 @@ pub fn mine(req: MineRequest) -> MineResult {
             let end = std::cmp::min(start + chunk_size, max_iterations);
 
             for i in start..end {
+                // Check cancellation every iteration
+                if cancel.load(Ordering::Relaxed) {
+                    return None;
+                }
+
                 // Create 32-byte salt from iteration number
                 let mut salt = [0u8; 32];
                 let i_bytes = i.to_be_bytes();
@@ -100,6 +106,14 @@ pub fn mine(req: MineRequest) -> MineResult {
         attempts: max_iterations,
         found: false,
     })
+}
+
+/// Mine a CREATE2 salt that produces an address with the desired prefix.
+///
+/// Convenience wrapper around `mine_cancellable` without cancellation support.
+pub fn mine(req: MineRequest) -> MineResult {
+    let cancel = AtomicBool::new(false);
+    mine_cancellable(req, &cancel)
 }
 
 /// Compute a CREATE2 address.

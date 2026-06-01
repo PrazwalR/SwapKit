@@ -15,13 +15,19 @@ use axum::{
     Router,
 };
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+use tokio::sync::Semaphore;
 use tower_http::cors::{CorsLayer, Any};
 use tracing_subscriber::EnvFilter;
 
 mod mev;
 mod quote;
 mod mining;
+
+/// Limit concurrent mining requests to prevent rayon thread pool starvation.
+static MINE_SEMAPHORE: Semaphore = Semaphore::const_new(2);
 
 use swap_kit_types::{
     MineRequest, MineResult, QuoteRequest, QuoteResponse, SimulateRequest,
@@ -69,9 +75,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("swap-kit-engine listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
-    
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+
+    tracing::info!("Server shut down gracefully");
     Ok(())
+}
+
+/// Wait for a shutdown signal (SIGINT / Ctrl+C).
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to install Ctrl+C handler");
+    tracing::info!("Shutdown signal received, draining connections…");
 }
 
 async fn health() -> &'static str {
@@ -100,12 +117,27 @@ async fn get_quote(Json(req): Json<QuoteRequest>) -> impl IntoResponse {
 }
 
 async fn mine_hook_address(Json(req): Json<MineRequest>) -> impl IntoResponse {
-    // Run mining in a blocking thread with a 30-second timeout to prevent DoS
+    // Limit concurrent mining to prevent rayon thread pool starvation (H-7)
+    let _permit = match MINE_SEMAPHORE.try_acquire() {
+        Ok(p) => p,
+        Err(_) => {
+            return (StatusCode::TOO_MANY_REQUESTS, Json(MineResult {
+                salt: String::new(), address: String::new(), attempts: 0, found: false,
+            })).into_response();
+        }
+    };
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_clone = cancel.clone();
+
     let result = tokio::time::timeout(
         Duration::from_secs(30),
-        tokio::task::spawn_blocking(move || mining::hook_miner::mine(req)),
+        tokio::task::spawn_blocking(move || mining::hook_miner::mine_cancellable(req, &cancel_clone)),
     )
     .await;
+
+    // Signal cancellation on timeout or completion
+    cancel.store(true, Ordering::Relaxed);
 
     match result {
         Ok(Ok(mine_result)) => (StatusCode::OK, Json(mine_result)).into_response(),

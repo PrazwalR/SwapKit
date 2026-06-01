@@ -73,7 +73,9 @@ export class MEVGuard {
   applyMEVToQuote(quote: QuoteResult, report: MEVReport): QuoteResult {
     const updated = { ...quote };
     updated.mevExposure = report.estimatedMEVWei;
-    updated.netAmountOut = quote.netAmountOut - report.estimatedMEVWei;
+    updated.netAmountOut = quote.netAmountOut > report.estimatedMEVWei
+      ? quote.netAmountOut - report.estimatedMEVWei
+      : 0n;
     return updated;
   }
 }

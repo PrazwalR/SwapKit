@@ -1,5 +1,6 @@
 *.md
 !README.md
+*.sh
 
 *.env
 test-harness/

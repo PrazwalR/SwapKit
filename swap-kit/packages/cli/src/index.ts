@@ -3,7 +3,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
 import { SwapKit } from "@swap-kit/core";
-import { createWalletClient, http } from "viem";
+import { createWalletClient, createPublicClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { mainnet, base, arbitrum } from "viem/chains";
 import { parseAmount, displayQuote } from "./utils.js";
@@ -202,8 +202,26 @@ program
           }
       }
 
+      const fromToken = quote.routeData.srcToken || quote.routeData.priceRoute?.srcToken || "0x0000000000000000000000000000000000000000";
+      const toToken = quote.routeData.dstToken || quote.routeData.priceRoute?.destToken || "0x0000000000000000000000000000000000000000";
+      const fromAmount = quote.routeData.fromAmount || quote.routeData.priceRoute?.srcAmount || "0";
+
+      const intent = {
+        fromChainId: chainId,
+        toChainId: chainId,
+        fromToken,
+        toToken,
+        fromAmount: BigInt(fromAmount),
+        maxSlippageBps: 50,
+      };
+
       const walletClient = createWalletClient({
         account,
+        chain,
+        transport: http(rpcUrl),
+      });
+
+      const publicClient = createPublicClient({
         chain,
         transport: http(rpcUrl),
       });
@@ -211,8 +229,8 @@ program
       const spinner = p.spinner();
       spinner.start(`Executing trade via ${quote.protocol}...`);
       
-      const result = await kit.execute(quote, walletClient as any);
-      spinner.stop(chalk.green(`Execution successful! TxHash: ${result.txHash}`));
+      const result = await kit.getExecutionEngine().execute(intent as any, quote, walletClient as any, publicClient as any);
+      spinner.stop(chalk.green(`Execution successful! TxHash: ${result.txHash || result.orderHash || 'Success'}`));
       
       p.outro(chalk.bold("Swap complete."));
     } catch (e: any) {

@@ -76,7 +76,7 @@ export class OneInchFusionAdapter implements ISwapAdapter {
       amountOut,
       gasCostWei: isCrossChain ? 0n : estimatedGas,
       mevExposure: 0n,
-      netAmountOut: amountOut > estimatedGas && !isCrossChain ? amountOut - estimatedGas : amountOut,
+      netAmountOut: amountOut,
       priceImpactBps: data.estimatedPriceImpact
         ? Math.round(parseFloat(data.estimatedPriceImpact) * 100)
         : -1, // -1 means unknown

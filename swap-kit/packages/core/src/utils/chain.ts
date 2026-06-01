@@ -150,8 +150,12 @@ export function getPublicClient(
     1: process.env.RPC_ETHEREUM,
     8453: process.env.RPC_BASE,
     42161: process.env.RPC_ARBITRUM,
+    10: process.env.RPC_OPTIMISM,
+    137: process.env.RPC_POLYGON,
+    56: process.env.RPC_BNB,
+    11155111: process.env.RPC_SEPOLIA,
   };
-  const url = rpcUrl ?? alchemyUrl ?? envOverrides[chainId] ?? config.rpcUrl;
+  const url = rpcUrl ?? envOverrides[chainId] ?? alchemyUrl ?? config.rpcUrl;
   const cacheKey = `${chainId}:${url}`;
 
   const cached = clientCache.get(cacheKey);

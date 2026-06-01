@@ -93,7 +93,7 @@ export class ParaswapAdapter implements ISwapAdapter {
         amountOut,
         gasCostWei,
         mevExposure:    0n,     // filled by MEVGuard
-        netAmountOut:   amountOut - gasCostWei,
+        netAmountOut:   amountOut,
         priceImpactBps: Math.max(0, priceImpactBps),
         routeData: {
           type:       "paraswap",
@@ -210,33 +210,7 @@ export class ParaswapAdapter implements ISwapAdapter {
     return response.json() as Promise<ParaswapPriceResponse>;
   }
 
-  /**
-   * Returns the number of decimals for well-known tokens.
-   * Falls back to 18 for unknown tokens (most ERC-20s use 18).
-   */
-  private getKnownDecimals(address: string): number {
-    const addr = address.toLowerCase();
-    // Native ETH/MATIC/BNB sentinel
-    if (addr === "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee") return 18;
-    // USDC (all chains)
-    if (addr === "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48") return 6;   // Ethereum
-    if (addr === "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913") return 6;   // Base
-    if (addr === "0xaf88d065e77c8cc2239327c5edb3a432268e5831") return 6;   // Arbitrum
-    if (addr === "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359") return 6;   // Polygon
-    // USDT
-    if (addr === "0xdac17f958d2ee523a2206206994597c13d831ec7") return 6;   // Ethereum
-    if (addr === "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9") return 6;   // Arbitrum
-    // WBTC
-    if (addr === "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599") return 8;   // Ethereum
-    // WETH
-    if (addr === "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2") return 18;  // Ethereum
-    if (addr === "0x4200000000000000000000000000000000000006") return 18;  // Base
-    if (addr === "0x82af49447d8a07e3bd95bd0d56f35241523fbab1") return 18;  // Arbitrum
-    // DAI
-    if (addr === "0x6b175474e89094c44da98b954eedeac495271d0f") return 18;  // Ethereum
-    // Default
-    return 18;
-  }
+
 
   /**
    * Calls Paraswap's /transactions endpoint to build the swap calldata.

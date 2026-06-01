@@ -35,12 +35,8 @@ rayon = "1.10"
 # Hashing (keccak256 for CREATE2)
 tiny-keccak = { version = "2", features = ["keccak"] }
 
-# HTTP client (for RPC calls)
-reqwest = { version = "0.12", features = ["json"] }
-
 # Error handling
 anyhow = "1"
-thiserror = "2"
 
 # Logging
 tracing = "0.1"

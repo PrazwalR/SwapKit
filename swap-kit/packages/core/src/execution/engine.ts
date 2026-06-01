@@ -55,11 +55,16 @@ export class ExecutionEngine {
       throw new Error(`No adapter found for protocol: ${quote.protocol}`);
     }
 
-    // Step 1: Handle token approvals (skip for native ETH and gasless protocols)
+    // Step 1: Handle token approvals (skip for native ETH and gasless cross-chain Fusion+ orders)
+    const isFusionGasless = quote.protocol === "1inch-fusion" && 
+      (quote.routeData as any)?.order?.srcChainId && 
+      (quote.routeData as any)?.order?.dstChainId &&
+      (quote.routeData as any).order.srcChainId !== (quote.routeData as any).order.dstChainId;
+
     if (
       this.config.autoApprove &&
       !isNativeToken(intent.fromToken as string) &&
-      quote.protocol !== "1inch-fusion" // Fusion+ handles approvals differently
+      !isFusionGasless
     ) {
       await this.ensureApproval(
         intent.fromToken as Address,
@@ -174,7 +179,7 @@ export class ExecutionEngine {
         // Paraswap's TokenTransferProxy
         return "0x216B4B4Ba9F3e719726886d34a177484278Bfcae";
       case "1inch-fusion":
-        return null; // Gasless, no approval needed from user
+        return "0x111111125421cA6dc452d289314280a0f8842A65" as Address; // 1inch AggregationRouterV6
       default:
         return null;
     }
