@@ -4,7 +4,6 @@
 //!
 //! - `GET  /health`    — Health check
 //! - `POST /simulate`  — MEV sandwich attack simulation (heuristic-based)
-//! - `POST /quote`     — Heuristic quote estimates (real quotes via TypeScript SDK)
 //! - `POST /mine`      — CREATE2 vanity address mining for Uniswap V4 hooks
 
 use axum::{
@@ -23,14 +22,13 @@ use tower_http::cors::{CorsLayer, Any};
 use tracing_subscriber::EnvFilter;
 
 mod mev;
-mod quote;
 mod mining;
 
 /// Limit concurrent mining requests to prevent rayon thread pool starvation.
 static MINE_SEMAPHORE: Semaphore = Semaphore::const_new(2);
 
 use swap_kit_types::{
-    MineRequest, MineResult, QuoteRequest, QuoteResponse, SimulateRequest,
+    MineRequest, MineResult, SimulateRequest,
 };
 
 #[tokio::main]
@@ -64,7 +62,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/health", get(health))
         .route("/simulate", post(simulate_mev))
-        .route("/quote", post(get_quote))
         .route("/mine", post(mine_hook_address))
         .layer(cors)
         .layer(body_limit);
@@ -105,16 +102,6 @@ async fn simulate_mev(Json(req): Json<SimulateRequest>) -> impl IntoResponse {
     }
 }
 
-async fn get_quote(Json(req): Json<QuoteRequest>) -> impl IntoResponse {
-    match quote::scanner::get_best_quote(&req).await {
-        Ok(quotes) => (StatusCode::OK, Json(quotes)).into_response(),
-        Err(e) => {
-            tracing::error!("Quote fetch failed: {e}");
-            let error_response = QuoteResponse { quotes: vec![] };
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response)).into_response()
-        }
-    }
-}
 
 async fn mine_hook_address(Json(req): Json<MineRequest>) -> impl IntoResponse {
     // Limit concurrent mining to prevent rayon thread pool starvation (H-7)

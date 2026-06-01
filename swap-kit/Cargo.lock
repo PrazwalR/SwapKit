@@ -588,14 +588,14 @@ dependencies = [
 
 [[package]]
 name = "swap-kit-engine"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "axum",
  "rayon",
  "serde",
  "serde_json",
- "swap-kit-types",
+ "swap-kit-types 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "tiny-keccak",
  "tokio",
  "tower",
@@ -606,7 +606,16 @@ dependencies = [
 
 [[package]]
 name = "swap-kit-types"
-version = "0.1.1"
+version = "0.1.2"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "swap-kit-types"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8123c66b76c1bf2fb6a91885261bfb6fb5c65e98afcc6b8237594e8d4f6af84a"
 dependencies = [
  "serde",
 ]

@@ -1,6 +1,6 @@
 {
   "name": "@swap-kit/cli",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "CLI for SwapKit — get DeFi quotes and simulate MEV from your terminal",
   "main": "./dist/index.js",
   "bin": {

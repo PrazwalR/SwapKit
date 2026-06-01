@@ -472,14 +472,6 @@ async function testRustEngine() {
     console.log(`(Risk: ${data.sandwich_risk})`);
   });
 
-  await test("POST /quote — parallel quote fetch", async () => {
-    const res = await fetch("http://localhost:3030/quote", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from_token: WETH, to_token: USDC, from_amount: AMOUNT_1_ETH.toString(), chain_id: 1,
-      }),
-    });
     assert(res.ok, `HTTP ${res.status}`);
     const data = await res.json() as any;
     assert(Array.isArray(data.quotes), "No quotes array");
