@@ -472,12 +472,6 @@ async function testRustEngine() {
     console.log(`(Risk: ${data.sandwich_risk})`);
   });
 
-    assert(res.ok, `HTTP ${res.status}`);
-    const data = await res.json() as any;
-    assert(Array.isArray(data.quotes), "No quotes array");
-    assert(data.quotes.length >= 2, `Expected ≥2 quotes, got ${data.quotes.length}`);
-    console.log(`(${data.quotes.length} quotes, best: ${data.quotes[0]?.protocol})`);
-  });
 
   await test("POST /mine — CREATE2 hook address mining (prefix '00')", async () => {
     const res = await fetch("http://localhost:3030/mine", {

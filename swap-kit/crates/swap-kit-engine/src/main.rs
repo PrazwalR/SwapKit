@@ -13,6 +13,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use clap::{Parser, Subcommand};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,6 +32,35 @@ use swap_kit_types::{
     MineRequest, MineResult, SimulateRequest,
 };
 
+#[derive(Parser)]
+#[command(name = "swap-kit-engine")]
+#[command(about = "MEV simulation and Hook mining engine", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Run the HTTP server (default)
+    Server,
+    /// Mine a CREATE2 vanity address locally
+    Mine {
+        /// Deployer address
+        #[arg(short, long)]
+        deployer: String,
+        /// Init code hash of the hook
+        #[arg(short, long)]
+        init_code_hash: String,
+        /// Desired hex prefix
+        #[arg(short, long)]
+        prefix: String,
+        /// Maximum iterations to brute force
+        #[arg(short, long)]
+        max_iterations: Option<u64>,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing with RUST_LOG env filter
@@ -40,7 +70,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .init();
 
-    // CORS: configurable via CORS_ORIGIN env var, defaults to permissive for local dev
+    let cli = Cli::parse();
+
+    match cli.command.unwrap_or(Commands::Server) {
+        Commands::Mine { deployer, init_code_hash, prefix, max_iterations } => {
+            tracing::info!("Starting native offline CREATE2 miner...");
+            let req = MineRequest {
+                deployer,
+                init_code_hash,
+                prefix,
+                max_iterations,
+            };
+            
+            // Execute the offline CPU mining
+            let result = tokio::task::spawn_blocking(move || {
+                mining::hook_miner::mine(req)
+            }).await?;
+            
+            // Print beautiful JSON result
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Commands::Server => {
+            // CORS: configurable via CORS_ORIGIN env var, defaults to permissive for local dev
     let cors_origin = std::env::var("CORS_ORIGIN").unwrap_or_else(|_| "*".to_string());
     let cors = if cors_origin == "*" {
         tracing::warn!("CORS is set to allow ALL origins. Set CORS_ORIGIN env var for production.");
@@ -78,6 +130,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("Server shut down gracefully");
     Ok(())
+        }
+    }
 }
 
 /// Wait for a shutdown signal (SIGINT / Ctrl+C).
