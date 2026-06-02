@@ -1,6 +1,6 @@
 {
   "name": "@swap-kit/cli",
-  "version": "0.1.9",
+  "version": "0.1.11",
   "description": "CLI for SwapKit — get DeFi quotes and simulate MEV from your terminal",
   "main": "./dist/index.js",
   "bin": {
@@ -29,7 +29,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/prazwal/swap-kit"
+    "url": "git+https://github.com/PrazwalR/SwapKit.git"
   },
   "engines": {
     "node": ">=18"

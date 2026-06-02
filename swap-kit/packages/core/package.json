@@ -1,6 +1,6 @@
 {
   "name": "@swap-kit/core",
-  "version": "0.1.10",
+  "version": "0.1.12",
   "type": "module",
   "description": "The unified intent-based liquidity layer for Web3",
   "main": "./dist/index.cjs",
@@ -49,11 +49,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/prazwal/swap-kit"
+    "url": "git+https://github.com/PrazwalR/SwapKit.git"
   },
-  "homepage": "https://github.com/prazwal/swap-kit#readme",
+  "homepage": "https://github.com/PrazwalR/SwapKit#readme",
   "bugs": {
-    "url": "https://github.com/prazwal/swap-kit/issues"
+    "url": "https://github.com/PrazwalR/SwapKit/issues"
   },
   "engines": {
     "node": ">=18"
