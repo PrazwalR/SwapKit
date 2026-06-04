@@ -1,4 +1,4 @@
-import type { WalletClient, PublicClient, Address, Hex } from "viem";
+import { type WalletClient, type PublicClient, type Address, type Hex, createWalletClient, http } from "viem";
 import type { SwapIntent, QuoteResult, SwapResult, SwapProtocol } from "../types.js";
 import type { ISwapAdapter } from "../adapters/base.js";
 import { ERC20ABI, Permit2ABI } from "../abis/index.js";
@@ -55,6 +55,17 @@ export class ExecutionEngine {
       throw new Error(`No adapter found for protocol: ${quote.protocol}`);
     }
 
+    // 🛡️ FLASHBOTS PROTECT INTERCEPTOR
+    let executionWalletClient = walletClient;
+    if (quote.sandwichRisk === "high") {
+      console.log("🛡️ High MEV risk detected! Rerouting transaction to Flashbots Protect RPC...");
+      executionWalletClient = createWalletClient({
+        account: walletClient.account!,
+        chain: walletClient.chain!,
+        transport: http("https://rpc.flashbots.net")
+      });
+    }
+
     // Step 1: Handle token approvals (skip for native ETH and gasless cross-chain Fusion+ orders)
     const isFusionGasless = quote.protocol === "1inch-fusion" && 
       (quote.routeData as any)?.order?.srcChainId && 
@@ -70,13 +81,13 @@ export class ExecutionEngine {
         intent.fromToken as Address,
         intent.fromAmount,
         quote,
-        walletClient,
+        executionWalletClient,
         publicClient
       );
     }
 
     // Step 2: Execute the swap via adapter
-    return adapter.execute(quote, walletClient, publicClient);
+    return adapter.execute(quote, executionWalletClient, publicClient);
   }
 
   /**

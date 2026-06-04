@@ -37,6 +37,8 @@ export interface QuoteResult {
   gasCostWei: bigint;
   /** MEV exposure estimate in toToken units (0 if unknown) */
   mevExposure: bigint;
+  /** The specific sandwich risk classification from the MEV Engine */
+  sandwichRisk?: "none" | "low" | "medium" | "high" | "unknown";
   /** Net output = amountOut - mevExposure (what user actually gets) */
   netAmountOut: bigint;
   /** Price impact in basis points */
