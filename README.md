@@ -676,6 +676,29 @@ No. Without the Rust engine, SwapKit uses static slippage values (e.g., 0.5%). W
 ### What is "Flashbots Protect"?
 When MEV risk is high, SwapKit routes your transaction through [Flashbots Protect](https://protect.flashbots.net/) — a **private submission channel** that sends your transaction directly to block builders, completely bypassing the public mempool. Bots literally cannot see your transaction to attack it.
 
+**Flashbots Protect is enabled by default.** You can configure it when creating the SDK:
+
+```typescript
+const sdk = createSwapKit({
+  oneInchApiKey: process.env.ONEINCH_API_KEY!,
+  rustEngineUrl: "http://localhost:3030",
+
+  // Flashbots configuration (all optional — sensible defaults are provided)
+  flashbotsEnabled: true,                              // Default: true
+  flashbotsProtectRpc: "https://rpc.flashbots.net",    // Default: Flashbots mainnet
+  onFlashbotsReroute: (quote) => {                     // Optional callback
+    console.log(`🛡️ Rerouted ${quote.protocol} swap via Flashbots Protect`);
+    // Send alert to your monitoring system, log to analytics, etc.
+  },
+});
+```
+
+**How it works internally:**
+1. The SDK fetches the best quote and sends it to the Rust MEV engine for sandwich risk analysis.
+2. If the engine returns `sandwichRisk: "high"`, the `ExecutionEngine` dynamically clones the user's wallet client with a Flashbots Protect RPC transport.
+3. The transaction is signed identically but submitted to Flashbots' private relay instead of the public mempool.
+4. Bots never see the transaction. The user's swap executes safely.
+
 ---
 
 ## 📊 Test Results

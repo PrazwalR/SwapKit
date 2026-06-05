@@ -19,6 +19,12 @@ export interface SwapKitConfig {
   rustEngineUrl?: string;
   /** Fail silently if MEV engine is unreachable. Default: true */
   mevFailOpen?: boolean;
+  /** Enable automatic Flashbots Protect rerouting on high MEV risk. Default: true */
+  flashbotsEnabled?: boolean;
+  /** Custom Flashbots Protect RPC URL. Default: https://rpc.flashbots.net */
+  flashbotsProtectRpc?: string;
+  /** Callback fired when a transaction is rerouted through Flashbots Protect */
+  onFlashbotsReroute?: (quote: QuoteResult) => void;
   /** Optional custom chains to inject into the global chain registry */
   customChains?: any[];
 }
@@ -44,7 +50,11 @@ export class SwapKit {
 
     this.quoteEngine = new QuoteEngine(this.adapters);
 
-    this.executionEngine = new ExecutionEngine(this.adapters);
+    this.executionEngine = new ExecutionEngine(this.adapters, {
+      flashbotsEnabled:    config.flashbotsEnabled,
+      flashbotsProtectRpc: config.flashbotsProtectRpc,
+      onFlashbotsReroute:  config.onFlashbotsReroute,
+    });
 
     this.mevGuard = new MEVGuard({
       engineUrl: config.rustEngineUrl,

@@ -10,11 +10,20 @@ const PERMIT2_ADDRESS: Address = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
 // Max uint256 for unlimited approval
 const MAX_UINT256 = 2n ** 256n - 1n;
 
+// Default Flashbots Protect RPC endpoint (Ethereum Mainnet)
+const DEFAULT_FLASHBOTS_RPC = "https://rpc.flashbots.net";
+
 export interface ExecutionEngineConfig {
   /** Auto-approve tokens before swapping. Default: true */
   autoApprove?: boolean;
   /** Use Permit2 for approvals (Uniswap). Default: true */
   usePermit2?: boolean;
+  /** Enable automatic Flashbots Protect rerouting on high MEV risk. Default: true */
+  flashbotsEnabled?: boolean;
+  /** Custom Flashbots Protect RPC URL. Default: https://rpc.flashbots.net */
+  flashbotsProtectRpc?: string;
+  /** Callback fired when a transaction is rerouted through Flashbots Protect */
+  onFlashbotsReroute?: (quote: QuoteResult) => void;
 }
 
 /**
@@ -25,7 +34,13 @@ export interface ExecutionEngineConfig {
  */
 export class ExecutionEngine {
   private adapters: Map<SwapProtocol, ISwapAdapter>;
-  private config: Required<ExecutionEngineConfig>;
+  private config: {
+    autoApprove: boolean;
+    usePermit2: boolean;
+    flashbotsEnabled: boolean;
+    flashbotsProtectRpc: string;
+    onFlashbotsReroute: ((quote: QuoteResult) => void) | null;
+  };
 
   constructor(
     adapters: ISwapAdapter[],
@@ -35,8 +50,11 @@ export class ExecutionEngine {
       adapters.map(a => [a.protocol as SwapProtocol, a])
     );
     this.config = {
-      autoApprove: config.autoApprove ?? true,
-      usePermit2:  config.usePermit2 ?? true,
+      autoApprove:        config.autoApprove ?? true,
+      usePermit2:         config.usePermit2 ?? true,
+      flashbotsEnabled:   config.flashbotsEnabled ?? true,
+      flashbotsProtectRpc: config.flashbotsProtectRpc ?? DEFAULT_FLASHBOTS_RPC,
+      onFlashbotsReroute: config.onFlashbotsReroute ?? null,
     };
   }
 
@@ -57,13 +75,23 @@ export class ExecutionEngine {
 
     // 🛡️ FLASHBOTS PROTECT INTERCEPTOR
     let executionWalletClient = walletClient;
-    if (quote.sandwichRisk === "high") {
+    if (this.config.flashbotsEnabled && quote.sandwichRisk === "high") {
       console.log("🛡️ High MEV risk detected! Rerouting transaction to Flashbots Protect RPC...");
       executionWalletClient = createWalletClient({
         account: walletClient.account!,
         chain: walletClient.chain!,
-        transport: http("https://rpc.flashbots.net")
+        transport: http(this.config.flashbotsProtectRpc)
       });
+
+      // Fire the developer callback if registered (wrapped in try/catch
+      // so a crashing callback can never take down the swap pipeline)
+      if (this.config.onFlashbotsReroute) {
+        try {
+          this.config.onFlashbotsReroute(quote);
+        } catch (err) {
+          console.warn("⚠️ onFlashbotsReroute callback threw:", err);
+        }
+      }
     }
 
     // Step 1: Handle token approvals (skip for native ETH and gasless cross-chain Fusion+ orders)
