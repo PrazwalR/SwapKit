@@ -120,3 +120,14 @@ export interface MEVReport {
   /** Detected sandwich bots targeting this pool */
   detectedBots: Address[];
 }
+
+// ─── Gasless (EIP-4337) ──────────────────────────────────────────────────────
+
+export interface GaslessConfig {
+  /** Enable gasless swap detection. Default: false */
+  enabled?: boolean;
+  /** Paymaster RPC URL (provider-specific). Required for actual gasless execution. */
+  paymasterUrl?: string;
+  /** Callback fired when a swap is detected as needing gasless execution */
+  onGaslessSwap?: (gasCheck: import("./gasless/detector.js").GasCheck) => void;
+}

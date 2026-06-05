@@ -1,4 +1,4 @@
-import type { SwapIntent, QuoteResult, SwapResult, SwapProtocol } from "./types.js";
+import type { SwapIntent, QuoteResult, SwapResult, SwapProtocol, GaslessConfig } from "./types.js";
 import { normalizeIntent } from "./intent/parser.js";
 import { QuoteEngine } from "./quote/engine.js";
 import { MEVGuard } from "./mev/guard.js";
@@ -25,6 +25,8 @@ export interface SwapKitConfig {
   flashbotsProtectRpc?: string;
   /** Callback fired when a transaction is rerouted through Flashbots Protect */
   onFlashbotsReroute?: (quote: QuoteResult) => void;
+  /** Gasless swap configuration (EIP-4337 Account Abstraction) */
+  gasless?: GaslessConfig;
   /** Optional custom chains to inject into the global chain registry */
   customChains?: any[];
 }
@@ -54,6 +56,7 @@ export class SwapKit {
       flashbotsEnabled:    config.flashbotsEnabled,
       flashbotsProtectRpc: config.flashbotsProtectRpc,
       onFlashbotsReroute:  config.onFlashbotsReroute,
+      gasless:             config.gasless,
     });
 
     this.mevGuard = new MEVGuard({
@@ -166,7 +169,6 @@ export function createSwapKit(config: SwapKitConfig): SwapKit {
 
 // ─── Re-exports ───────────────────────────────────────────────────────────────
 
-// Types
 export type {
   SwapIntent,
   QuoteResult,
@@ -178,6 +180,7 @@ export type {
   OneInchRouteData,
   ParaswapRouteData,
   FusionOrderStruct,
+  GaslessConfig,
 } from "./types.js";
 
 // Intent
@@ -191,6 +194,10 @@ export { MEVGuard } from "./mev/guard.js";
 export type { MEVGuardConfig } from "./mev/guard.js";
 export { ExecutionEngine } from "./execution/engine.js";
 export type { ExecutionEngineConfig } from "./execution/engine.js";
+
+// Gasless
+export { checkGasAffordability } from "./gasless/detector.js";
+export type { GasCheck } from "./gasless/detector.js";
 
 // Adapters
 export type { ISwapAdapter } from "./adapters/base.js";

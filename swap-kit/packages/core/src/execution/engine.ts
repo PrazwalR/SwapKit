@@ -1,8 +1,9 @@
 import { type WalletClient, type PublicClient, type Address, type Hex, createWalletClient, http } from "viem";
-import type { SwapIntent, QuoteResult, SwapResult, SwapProtocol } from "../types.js";
+import type { SwapIntent, QuoteResult, SwapResult, SwapProtocol, GaslessConfig } from "../types.js";
 import type { ISwapAdapter } from "../adapters/base.js";
 import { ERC20ABI, Permit2ABI } from "../abis/index.js";
 import { isNativeToken } from "../utils/token.js";
+import { checkGasAffordability, type GasCheck } from "../gasless/detector.js";
 
 // Permit2 is deployed at the same address on all chains
 const PERMIT2_ADDRESS: Address = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
@@ -24,6 +25,8 @@ export interface ExecutionEngineConfig {
   flashbotsProtectRpc?: string;
   /** Callback fired when a transaction is rerouted through Flashbots Protect */
   onFlashbotsReroute?: (quote: QuoteResult) => void;
+  /** Gasless swap configuration (EIP-4337 Account Abstraction) */
+  gasless?: GaslessConfig;
 }
 
 /**
@@ -40,6 +43,11 @@ export class ExecutionEngine {
     flashbotsEnabled: boolean;
     flashbotsProtectRpc: string;
     onFlashbotsReroute: ((quote: QuoteResult) => void) | null;
+    gasless: {
+      enabled: boolean;
+      paymasterUrl: string | null;
+      onGaslessSwap: ((gasCheck: GasCheck) => void) | null;
+    };
   };
 
   constructor(
@@ -55,6 +63,11 @@ export class ExecutionEngine {
       flashbotsEnabled:   config.flashbotsEnabled ?? true,
       flashbotsProtectRpc: config.flashbotsProtectRpc ?? DEFAULT_FLASHBOTS_RPC,
       onFlashbotsReroute: config.onFlashbotsReroute ?? null,
+      gasless: {
+        enabled:       config.gasless?.enabled ?? false,
+        paymasterUrl:  config.gasless?.paymasterUrl ?? null,
+        onGaslessSwap: config.gasless?.onGaslessSwap ?? null,
+      },
     };
   }
 
@@ -91,6 +104,34 @@ export class ExecutionEngine {
         } catch (err) {
           console.warn("⚠️ onFlashbotsReroute callback threw:", err);
         }
+      }
+    }
+
+    // ⛽ GASLESS SWAP INTERCEPTOR (EIP-4337)
+    if (this.config.gasless.enabled) {
+      const gasCheck = await checkGasAffordability(executionWalletClient, publicClient, quote);
+
+      if (!gasCheck.canAffordGas) {
+        console.log(
+          `⛽ Gasless mode: User is short by ${gasCheck.shortfallWei} wei ` +
+          `(balance: ${gasCheck.userBalanceWei}, needed: ${gasCheck.estimatedGasCostWei})`
+        );
+
+        // Fire the developer callback if registered
+        if (this.config.gasless.onGaslessSwap) {
+          try {
+            this.config.gasless.onGaslessSwap(gasCheck);
+          } catch (err) {
+            console.warn("⚠️ onGaslessSwap callback threw:", err);
+          }
+        }
+
+        // For now, throw a descriptive error until Paymaster integration is complete
+        throw new Error(
+          `Insufficient gas: user has ${gasCheck.userBalanceWei} wei but needs ` +
+          `${gasCheck.estimatedGasCostWei} wei. Gasless execution via Paymaster ` +
+          `is not yet available. Configure a paymasterUrl in the next release.`
+        );
       }
     }
 
