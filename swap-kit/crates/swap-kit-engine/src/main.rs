@@ -3,7 +3,7 @@
 //! # Endpoints
 //!
 //! - `GET  /health`    — Health check
-//! - `POST /simulate`  — MEV sandwich attack simulation (heuristic-based)
+//! - `POST /simulate`  — Production-grade MEV sandwich attack simulation (real on-chain data)
 //! - `POST /mine`      — CREATE2 vanity address mining for Uniswap V4 hooks
 
 use axum::{
@@ -63,6 +63,9 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Load .env file (if present) — RPC_URL, API keys, etc.
+    dotenvy::dotenv().ok();
+
     // Initialize tracing with RUST_LOG env filter
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
