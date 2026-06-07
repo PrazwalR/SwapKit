@@ -4,6 +4,7 @@ import type { WalletClient, PublicClient, Hex, Address } from "viem";
 import { getPublicClient } from "../utils/chain.js";
 import { isNativeToken, getTokenDecimals } from "../utils/token.js";
 import { ERC20ABI } from "../abis/index.js";
+import { assertValidSlippageBps } from "../intent/parser.js";
 
 // Paraswap API base URLs per chain
 const PARASWAP_API = "https://apiv5.paraswap.io";
@@ -62,6 +63,9 @@ export class ParaswapAdapter implements ISwapAdapter {
   }
 
   async quote(intent: Required<SwapIntent>): Promise<QuoteResult> {
+    // Defense-in-depth: reject unsafe slippage before it reaches the build-tx API.
+    assertValidSlippageBps(intent.maxSlippageBps);
+
     try {
       // Step 1: Get price/rate from Paraswap API
       const priceData = await this.getRate(intent);

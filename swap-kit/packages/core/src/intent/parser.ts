@@ -41,6 +41,39 @@ const KNOWN_TOKENS: Record<number, Record<string, `0x${string}`>> = {
 
 const NATIVE_ETH = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" as const;
 
+// ─── Slippage Bounds ──────────────────────────────────────────────────────────
+
+/** Minimum slippage tolerance: 1 bps (0.01%). 0 would make any swap unfillable. */
+export const MIN_SLIPPAGE_BPS = 1;
+/**
+ * Maximum slippage tolerance: 2000 bps (20%). This is a hard safety ceiling.
+ * Values at/above 10000 bps would set minOut to zero (or negative), removing all
+ * slippage protection and guaranteeing a full sandwich loss — so we reject early.
+ */
+export const MAX_SLIPPAGE_BPS = 2000;
+
+/**
+ * Validates that a slippage tolerance (in basis points) is a safe integer within
+ * `[MIN_SLIPPAGE_BPS, MAX_SLIPPAGE_BPS]`. Throws a descriptive error otherwise.
+ *
+ * This is the single source of truth for slippage validation across the SDK:
+ * `normalizeIntent` calls it for the live quote/swap path, and each adapter calls
+ * it defensively so direct adapter usage is protected too.
+ */
+export function assertValidSlippageBps(slippageBps: number): void {
+  if (typeof slippageBps !== "number" || !Number.isInteger(slippageBps)) {
+    throw new Error(
+      `maxSlippageBps must be an integer, got ${slippageBps}`
+    );
+  }
+  if (slippageBps < MIN_SLIPPAGE_BPS || slippageBps > MAX_SLIPPAGE_BPS) {
+    throw new Error(
+      `maxSlippageBps must be between ${MIN_SLIPPAGE_BPS} and ${MAX_SLIPPAGE_BPS} bps ` +
+      `(0.01%–20%), got ${slippageBps}. High slippage removes MEV/sandwich protection.`
+    );
+  }
+}
+
 /**
  * Resolves a token symbol (e.g. "ETH", "USDC") to its on-chain address
  * for the given chain. If already an address, checksums and returns it.
@@ -67,13 +100,19 @@ export function resolveToken(
 export function normalizeIntent(raw: SwapIntent): Required<SwapIntent> {
   const now = Math.floor(Date.now() / 1000);
 
+  // Validate slippage BEFORE it can reach minOut math in any adapter.
+  // Without this, e.g. maxSlippageBps >= 10000 produces a zero/negative minOut
+  // and silently disables all sandwich protection.
+  const maxSlippageBps = raw.maxSlippageBps ?? 50; // 0.5% default
+  assertValidSlippageBps(maxSlippageBps);
+
   return {
     fromToken:      resolveToken(raw.fromToken as string, raw.fromChainId),
     toToken:        resolveToken(raw.toToken as string, raw.toChainId ?? raw.fromChainId),
     fromAmount:     raw.fromAmount,
     fromChainId:    raw.fromChainId,
     toChainId:      raw.toChainId ?? raw.fromChainId,
-    maxSlippageBps: raw.maxSlippageBps ?? 50,       // 0.5% default
+    maxSlippageBps,
     deadline:       raw.deadline ?? now + 1200,      // 20 min default
     protocols:      raw.protocols ?? ["uniswap-v4", "1inch-fusion", "paraswap"],
     skipMEVCheck:   raw.skipMEVCheck ?? false,

@@ -21,6 +21,7 @@ import type {
   UniswapV4RouteData,
 } from "../types.js";
 import { getPublicClient } from "../utils/chain.js";
+import { assertValidSlippageBps } from "../intent/parser.js";
 
 // Chain-specific addresses (Uniswap v4 deployments)
 const UNISWAP_V4_ADDRESSES: Record<number, {
@@ -109,6 +110,9 @@ export class UniswapV4Adapter implements ISwapAdapter {
   }
 
   async quote(intent: Required<SwapIntent>): Promise<QuoteResult> {
+    // Defense-in-depth: reject unsafe slippage before it reaches minOut math.
+    assertValidSlippageBps(intent.maxSlippageBps);
+
     const addrs = UNISWAP_V4_ADDRESSES[intent.fromChainId];
     if (!addrs) throw new Error(`Uniswap v4 not deployed on chain ${intent.fromChainId}`);
 
@@ -147,7 +151,6 @@ export class UniswapV4Adapter implements ISwapAdapter {
       intent.fromAmount,
       bestAmountOut,
       intent.maxSlippageBps,
-      intent.recipient,
       intent.deadline,
       zeroForOne
     );
@@ -336,12 +339,14 @@ export class UniswapV4Adapter implements ISwapAdapter {
     }
   }
 
+  // NOTE: The encoded route settles via TAKE_ALL, which delivers the output to
+  // msgSender (the signer) — there is no recipient parameter here by design. A
+  // custom recipient is rejected upstream in ExecutionEngine.execute().
   private encodeSwapCalldata(
     poolKey: PoolKey,
     amountIn: bigint,
     amountOut: bigint,
     slippageBps: number,
-    recipient: Address,
     deadline: number,
     zeroForOne: boolean
   ): Hex {

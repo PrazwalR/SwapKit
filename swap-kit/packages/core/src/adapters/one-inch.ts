@@ -4,6 +4,7 @@ import type { WalletClient, PublicClient, Hex, Address } from "viem";
 import { getPublicClient } from "../utils/chain.js";
 import { isNativeToken } from "../utils/token.js";
 import { ERC20ABI } from "../abis/index.js";
+import { assertValidSlippageBps } from "../intent/parser.js";
 
 export class OneInchFusionAdapter implements ISwapAdapter {
   readonly protocol = "1inch-fusion" as const;
@@ -29,6 +30,9 @@ export class OneInchFusionAdapter implements ISwapAdapter {
     if (!this.apiKey) {
       throw new Error("1inch API key is required for Fusion+ quotes");
     }
+
+    // Defense-in-depth: reject unsafe slippage before it reaches the swap API.
+    assertValidSlippageBps(intent.maxSlippageBps);
 
     const isCrossChain = intent.fromChainId !== intent.toChainId;
     let url = "";

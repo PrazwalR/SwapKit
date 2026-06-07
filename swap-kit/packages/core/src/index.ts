@@ -2,7 +2,7 @@ import type { SwapIntent, QuoteResult, SwapResult, SwapProtocol, GaslessConfig }
 import { normalizeIntent } from "./intent/parser.js";
 import { QuoteEngine } from "./quote/engine.js";
 import { MEVGuard } from "./mev/guard.js";
-import { ExecutionEngine } from "./execution/engine.js";
+import { ExecutionEngine, type ApprovalStrategy } from "./execution/engine.js";
 import { UniswapV4Adapter } from "./adapters/uniswap-v4.js";
 import { OneInchFusionAdapter } from "./adapters/one-inch.js";
 import { ParaswapAdapter } from "./adapters/paraswap.js";
@@ -21,12 +21,19 @@ export interface SwapKitConfig {
   mevFailOpen?: boolean;
   /** Enable automatic Flashbots Protect rerouting on high MEV risk. Default: true */
   flashbotsEnabled?: boolean;
+  /**
+   * Fail-safe: also reroute through Flashbots Protect when MEV risk is "unknown"
+   * (engine unreachable/compromised). Mainnet-only. Default: false.
+   */
+  flashbotsRerouteOnUnknownRisk?: boolean;
   /** Custom Flashbots Protect RPC URL. Default: https://rpc.flashbots.net */
   flashbotsProtectRpc?: string;
   /** Callback fired when a transaction is rerouted through Flashbots Protect */
   onFlashbotsReroute?: (quote: QuoteResult) => void;
   /** Gasless swap configuration (EIP-4337 Account Abstraction) */
   gasless?: GaslessConfig;
+  /** ERC-20 allowance strategy: "exact" (default, safest) or "infinite". */
+  approvalStrategy?: ApprovalStrategy;
   /** Optional custom chains to inject into the global chain registry */
   customChains?: any[];
 }
@@ -54,9 +61,11 @@ export class SwapKit {
 
     this.executionEngine = new ExecutionEngine(this.adapters, {
       flashbotsEnabled:    config.flashbotsEnabled,
+      flashbotsRerouteOnUnknownRisk: config.flashbotsRerouteOnUnknownRisk,
       flashbotsProtectRpc: config.flashbotsProtectRpc,
       onFlashbotsReroute:  config.onFlashbotsReroute,
       gasless:             config.gasless,
+      approvalStrategy:    config.approvalStrategy,
     });
 
     this.mevGuard = new MEVGuard({
@@ -184,7 +193,13 @@ export type {
 } from "./types.js";
 
 // Intent
-export { normalizeIntent, resolveToken } from "./intent/parser.js";
+export {
+  normalizeIntent,
+  resolveToken,
+  assertValidSlippageBps,
+  MIN_SLIPPAGE_BPS,
+  MAX_SLIPPAGE_BPS,
+} from "./intent/parser.js";
 export { SwapIntentSchema } from "./intent/schema.js";
 
 // Engines
@@ -193,7 +208,7 @@ export type { QuoteEngineConfig } from "./quote/engine.js";
 export { MEVGuard } from "./mev/guard.js";
 export type { MEVGuardConfig } from "./mev/guard.js";
 export { ExecutionEngine } from "./execution/engine.js";
-export type { ExecutionEngineConfig } from "./execution/engine.js";
+export type { ExecutionEngineConfig, ApprovalStrategy } from "./execution/engine.js";
 
 // Gasless
 export { checkGasAffordability } from "./gasless/detector.js";
