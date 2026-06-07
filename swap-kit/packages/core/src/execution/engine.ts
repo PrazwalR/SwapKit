@@ -14,13 +14,32 @@ const MAX_UINT256 = 2n ** 256n - 1n;
 // Default Flashbots Protect RPC endpoint (Ethereum Mainnet)
 const DEFAULT_FLASHBOTS_RPC = "https://rpc.flashbots.net";
 
+/**
+ * How much allowance to grant when approving a token to a router/spender.
+ * - `"exact"`    — approve only the amount needed for this swap (safest; default).
+ *                  Limits loss to the current trade if the spender is ever exploited.
+ * - `"infinite"` — approve MAX_UINT256 once (saves gas on repeat swaps, but the
+ *                  spender can move the entire balance forever).
+ */
+export type ApprovalStrategy = "exact" | "infinite";
+
 export interface ExecutionEngineConfig {
   /** Auto-approve tokens before swapping. Default: true */
   autoApprove?: boolean;
   /** Use Permit2 for approvals (Uniswap). Default: true */
   usePermit2?: boolean;
+  /** Allowance amount strategy for ERC-20 approvals. Default: "exact" */
+  approvalStrategy?: ApprovalStrategy;
   /** Enable automatic Flashbots Protect rerouting on high MEV risk. Default: true */
   flashbotsEnabled?: boolean;
+  /**
+   * Fail-safe: also reroute through Flashbots Protect when MEV risk is "unknown"
+   * (i.e. the MEV engine was unreachable/slow, or returned an unparseable result).
+   * Without this, a down or compromised MEV engine silently disables protection.
+   * Default: false — only enable on Ethereum mainnet, where the Flashbots Protect
+   * RPC is valid (rerouting an L2 swap to a mainnet RPC would break it).
+   */
+  flashbotsRerouteOnUnknownRisk?: boolean;
   /** Custom Flashbots Protect RPC URL. Default: https://rpc.flashbots.net */
   flashbotsProtectRpc?: string;
   /** Callback fired when a transaction is rerouted through Flashbots Protect */
@@ -40,7 +59,9 @@ export class ExecutionEngine {
   private config: {
     autoApprove: boolean;
     usePermit2: boolean;
+    approvalStrategy: ApprovalStrategy;
     flashbotsEnabled: boolean;
+    flashbotsRerouteOnUnknownRisk: boolean;
     flashbotsProtectRpc: string;
     onFlashbotsReroute: ((quote: QuoteResult) => void) | null;
     gasless: {
@@ -60,7 +81,9 @@ export class ExecutionEngine {
     this.config = {
       autoApprove:        config.autoApprove ?? true,
       usePermit2:         config.usePermit2 ?? true,
+      approvalStrategy:   config.approvalStrategy ?? "exact",
       flashbotsEnabled:   config.flashbotsEnabled ?? true,
+      flashbotsRerouteOnUnknownRisk: config.flashbotsRerouteOnUnknownRisk ?? false,
       flashbotsProtectRpc: config.flashbotsProtectRpc ?? DEFAULT_FLASHBOTS_RPC,
       onFlashbotsReroute: config.onFlashbotsReroute ?? null,
       gasless: {
@@ -86,10 +109,42 @@ export class ExecutionEngine {
       throw new Error(`No adapter found for protocol: ${quote.protocol}`);
     }
 
+    // 🎯 RECIPIENT SAFETY CHECK
+    // Every adapter delivers swap output to the signer (Uniswap v4 settles via
+    // TAKE_ALL → msgSender; 1inch/Paraswap use the signer as `from`/receiver).
+    // A custom recipient is NOT honored, so rather than silently misrouting funds
+    // to the signer we reject loudly. (Security audit: v4 `recipient` was ignored.)
+    const signer = walletClient.account?.address;
+    if (
+      signer &&
+      intent.recipient &&
+      intent.recipient !== "0x0000000000000000000000000000000000000000" &&
+      intent.recipient.toLowerCase() !== signer.toLowerCase()
+    ) {
+      throw new Error(
+        `Custom recipient is not supported: swap output is delivered to the signer ` +
+        `(${signer}), but intent.recipient is ${intent.recipient}. Omit recipient ` +
+        `(or set it to the signer) and transfer the output separately.`
+      );
+    }
+
     // 🛡️ FLASHBOTS PROTECT INTERCEPTOR
+    // Reroute on confirmed high risk, and — when the fail-safe is enabled — also
+    // when risk is "unknown" (engine down/slow/compromised). The latter is opt-in
+    // so we don't reroute every swap to a mainnet RPC when no engine is configured.
     let executionWalletClient = walletClient;
-    if (this.config.flashbotsEnabled && quote.sandwichRisk === "high") {
-      console.log("🛡️ High MEV risk detected! Rerouting transaction to Flashbots Protect RPC...");
+    const isHighRisk = quote.sandwichRisk === "high";
+    const isUnknownRisk = quote.sandwichRisk === "unknown";
+    const shouldReroute =
+      this.config.flashbotsEnabled &&
+      (isHighRisk || (this.config.flashbotsRerouteOnUnknownRisk && isUnknownRisk));
+
+    if (shouldReroute) {
+      console.log(
+        isHighRisk
+          ? "🛡️ High MEV risk detected! Rerouting transaction to Flashbots Protect RPC..."
+          : "🛡️ MEV risk could not be assessed (fail-safe) — rerouting to Flashbots Protect RPC..."
+      );
       executionWalletClient = createWalletClient({
         account: walletClient.account!,
         chain: walletClient.chain!,
@@ -233,12 +288,17 @@ export class ExecutionEngine {
 
     if (currentAllowance >= amount) return; // Already approved
 
-    // Approve max amount (one-time, saves gas on future swaps)
+    // "exact" (default) limits exposure to this trade; "infinite" approves
+    // MAX_UINT256 once to save gas on future swaps at the cost of standing risk.
+    const approvalAmount = this.config.approvalStrategy === "infinite"
+      ? MAX_UINT256
+      : amount;
+
     const { request } = await publicClient.simulateContract({
       address: tokenAddress,
       abi: ERC20ABI,
       functionName: "approve",
-      args: [spenderAddress, MAX_UINT256],
+      args: [spenderAddress, approvalAmount],
       account: ownerAddress,
     });
 
