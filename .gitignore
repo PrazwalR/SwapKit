@@ -3,4 +3,5 @@
 *.sh
 
 *.env
+*.log
 test-harness/

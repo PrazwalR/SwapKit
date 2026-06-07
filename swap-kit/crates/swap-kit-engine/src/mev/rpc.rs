@@ -46,7 +46,9 @@ impl EthRpcClient {
             .build()
             .ok()?;
 
-        tracing::info!("MEV simulator connected to RPC: {}...{}", &url[..20.min(url.len())], if url.len() > 30 { &url[url.len()-10..] } else { "" });
+        // Log only the scheme + host. The API key lives in the URL path or query
+        // for providers like Alchemy/Infura, so we must never log the tail of the URL.
+        tracing::info!("MEV simulator connected to RPC host: {}", redact_rpc_url(&url));
         Some(Self { url, client })
     }
 
@@ -145,6 +147,35 @@ impl EthRpcClient {
     }
 }
 
+/// Reduce an RPC URL to just `scheme://host`, dropping the path, query, fragment,
+/// and any `user:pass@` userinfo — all of which can carry secrets (e.g. the API
+/// key in an Alchemy/Infura URL). Safe to write to logs.
+///
+/// Returns `"<redacted>"` for anything that doesn't look like a URL, so a
+/// malformed value can never accidentally leak in full.
+fn redact_rpc_url(url: &str) -> String {
+    let (scheme, rest) = match url.split_once("://") {
+        Some(pair) => pair,
+        None => return "<redacted>".to_string(),
+    };
+
+    // Authority ends at the first '/', '?', or '#'.
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+
+    // Strip any userinfo ("user:pass@host" -> "host").
+    let host = match authority.rsplit_once('@') {
+        Some((_userinfo, host)) => host,
+        None => authority,
+    };
+
+    if scheme.is_empty() || host.is_empty() {
+        return "<redacted>".to_string();
+    }
+
+    format!("{}://{}", scheme, host)
+}
+
 /// Parse a hex string (0x-prefixed) into u128.
 fn parse_hex_u128(hex_str: &str) -> Result<u128> {
     let clean = hex_str.trim_start_matches("0x");
@@ -176,5 +207,71 @@ mod tests {
         // When RPC_URL is not set, should return None
         std::env::remove_var("RPC_URL");
         assert!(EthRpcClient::from_env().is_none());
+    }
+
+    // ─── redact_rpc_url ────────────────────────────────────────────────────
+
+    /// The Alchemy key is the trailing path segment — it must never appear.
+    #[test]
+    fn test_redact_alchemy_url_hides_key() {
+        let key = "Abc123_SECRET_KEY_xyz789";
+        let url = format!("https://eth-mainnet.g.alchemy.com/v2/{}", key);
+        let redacted = redact_rpc_url(&url);
+        assert_eq!(redacted, "https://eth-mainnet.g.alchemy.com");
+        assert!(!redacted.contains(key), "redacted log must not contain the API key");
+        assert!(!redacted.contains("v2"), "redacted log must not contain the path");
+    }
+
+    /// Infura-style key in path.
+    #[test]
+    fn test_redact_infura_url_hides_key() {
+        let key = "0123456789abcdef0123456789abcdef";
+        let url = format!("https://mainnet.infura.io/v3/{}", key);
+        let redacted = redact_rpc_url(&url);
+        assert_eq!(redacted, "https://mainnet.infura.io");
+        assert!(!redacted.contains(key));
+    }
+
+    /// Key passed as a query parameter must also be dropped.
+    #[test]
+    fn test_redact_query_param_key_hidden() {
+        let url = "https://rpc.example.com/path?apikey=SUPER_SECRET";
+        let redacted = redact_rpc_url(url);
+        assert_eq!(redacted, "https://rpc.example.com");
+        assert!(!redacted.contains("SUPER_SECRET"));
+        assert!(!redacted.contains("apikey"));
+    }
+
+    /// userinfo credentials (user:pass@host) must be stripped.
+    #[test]
+    fn test_redact_strips_userinfo_credentials() {
+        let url = "https://user:p4ssw0rd@rpc.example.com/v2/KEY";
+        let redacted = redact_rpc_url(url);
+        assert_eq!(redacted, "https://rpc.example.com");
+        assert!(!redacted.contains("p4ssw0rd"));
+        assert!(!redacted.contains("user"));
+        assert!(!redacted.contains("KEY"));
+    }
+
+    /// Host with a port is preserved (no secret there).
+    #[test]
+    fn test_redact_keeps_host_and_port() {
+        assert_eq!(redact_rpc_url("http://127.0.0.1:8545"), "http://127.0.0.1:8545");
+        assert_eq!(redact_rpc_url("http://localhost:8545/"), "http://localhost:8545");
+    }
+
+    /// A bare host with no path round-trips to itself.
+    #[test]
+    fn test_redact_no_path() {
+        assert_eq!(redact_rpc_url("https://cloudflare-eth.com"), "https://cloudflare-eth.com");
+    }
+
+    /// Anything that isn't a URL is fully redacted rather than leaked.
+    #[test]
+    fn test_redact_malformed_is_fully_hidden() {
+        assert_eq!(redact_rpc_url("not_a_url_just_a_secret"), "<redacted>");
+        assert_eq!(redact_rpc_url(""), "<redacted>");
+        assert_eq!(redact_rpc_url("://no-scheme/path"), "<redacted>");
+        assert_eq!(redact_rpc_url("https://"), "<redacted>");
     }
 }
