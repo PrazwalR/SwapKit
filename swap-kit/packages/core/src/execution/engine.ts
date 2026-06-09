@@ -4,12 +4,16 @@ import type { ISwapAdapter } from "../adapters/base.js";
 import { ERC20ABI, Permit2ABI } from "../abis/index.js";
 import { isNativeToken } from "../utils/token.js";
 import { checkGasAffordability, type GasCheck } from "../gasless/detector.js";
+import { UNISWAP_V4_ADDRESSES } from "../adapters/uniswap-v4.js";
 
 // Permit2 is deployed at the same address on all chains
 const PERMIT2_ADDRESS: Address = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
 
-// Max uint256 for unlimited approval
+// Max uint256 for unlimited ERC-20 approval; Permit2 amounts are uint160.
 const MAX_UINT256 = 2n ** 256n - 1n;
+const MAX_UINT160 = 2n ** 160n - 1n;
+// Permit2 allowance expiration is a uint48 unix timestamp. 30 days ahead.
+const PERMIT2_EXPIRATION_SECONDS = 30 * 24 * 60 * 60;
 
 // Default Flashbots Protect RPC endpoint (Ethereum Mainnet)
 const DEFAULT_FLASHBOTS_RPC = "https://rpc.flashbots.net";
@@ -241,8 +245,10 @@ export class ExecutionEngine {
     const owner = walletClient.account!.address;
 
     if (this.config.usePermit2 && quote.protocol === "uniswap-v4") {
-      // Uniswap v4 uses Permit2 — approve token to Permit2 first,
-      // then Permit2 will authorize the UniversalRouter
+      // Uniswap v4 uses Permit2 — this requires TWO approvals:
+      //   1. ERC-20 approve(token → Permit2)          — lets Permit2 pull the token
+      //   2. Permit2 approve(token, UniversalRouter)   — lets the router pull via Permit2
+      // Without step 2 the UniversalRouter cannot move the token and the swap reverts.
       await this.ensureERC20Approval(
         tokenAddress,
         PERMIT2_ADDRESS,
@@ -251,6 +257,18 @@ export class ExecutionEngine {
         walletClient,
         publicClient
       );
+
+      const universalRouter = UNISWAP_V4_ADDRESSES[walletClient.chain!.id]?.universalRouter;
+      if (universalRouter) {
+        await this.ensurePermit2Allowance(
+          tokenAddress,
+          universalRouter,
+          amount,
+          owner,
+          walletClient,
+          publicClient
+        );
+      }
     } else {
       // Standard ERC-20 approval to the protocol's router
       const spender = this.getSpenderForProtocol(quote, walletClient.chain!.id);
@@ -299,6 +317,50 @@ export class ExecutionEngine {
       abi: ERC20ABI,
       functionName: "approve",
       args: [spenderAddress, approvalAmount],
+      account: ownerAddress,
+    });
+
+    await walletClient.writeContract(request);
+  }
+
+  /**
+   * Grants a Permit2 allowance so `spenderAddress` (the UniversalRouter) can pull
+   * `tokenAddress` from the owner via Permit2. This is the SECOND leg of the
+   * Uniswap v4 approval flow — the ERC-20 → Permit2 approval alone is insufficient.
+   *
+   * Permit2 amounts are uint160 and allowances carry a uint48 expiration; the
+   * "infinite" strategy grants the uint160 max, "exact" grants just the trade amount.
+   */
+  private async ensurePermit2Allowance(
+    tokenAddress: Address,
+    spenderAddress: Address,
+    amount: bigint,
+    ownerAddress: Address,
+    walletClient: WalletClient,
+    publicClient: PublicClient
+  ): Promise<void> {
+    // Permit2.allowance(owner, token, spender) → (amount, expiration, nonce)
+    const [currentAmount, currentExpiration] = await publicClient.readContract({
+      address: PERMIT2_ADDRESS,
+      abi: Permit2ABI,
+      functionName: "allowance",
+      args: [ownerAddress, tokenAddress, spenderAddress],
+    }) as [bigint, number, number];
+
+    const now = Math.floor(Date.now() / 1000);
+    // Sufficient if the allowance covers the amount AND has not expired.
+    if (currentAmount >= amount && Number(currentExpiration) > now) return;
+
+    const approvalAmount = this.config.approvalStrategy === "infinite"
+      ? MAX_UINT160
+      : amount;
+    const expiration = now + PERMIT2_EXPIRATION_SECONDS;
+
+    const { request } = await publicClient.simulateContract({
+      address: PERMIT2_ADDRESS,
+      abi: Permit2ABI,
+      functionName: "approve",
+      args: [tokenAddress, spenderAddress, approvalAmount, expiration],
       account: ownerAddress,
     });
 

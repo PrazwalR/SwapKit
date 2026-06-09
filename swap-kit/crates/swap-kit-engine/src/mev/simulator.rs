@@ -82,8 +82,12 @@ pub async fn simulate(req: &SimulateRequest) -> Result<SimulateResponse> {
     let bot_scan = scan_recent_blocks(rpc.as_ref(), BLOCKS_TO_SCAN).await;
 
     // ─── Stage 2: Calculate sandwich profitability ─────────────────────
+    // Value the trade in the chain's native token so the profitability decision
+    // compares like units (extractable value vs gas, both in native wei).
+    let eth_notional = native_notional_wei(req, from_amount, amount_out);
     let profitability = calculate_sandwich_profitability(
         amount_out,
+        eth_notional,
         slippage_bps,
         gas_price,
         is_mainnet,
@@ -126,6 +130,40 @@ pub async fn simulate(req: &SimulateRequest) -> Result<SimulateResponse> {
         recommended_slippage_bps: final_slippage,
         detected_bots: bot_scan.detected_bots,
     })
+}
+
+/// True if `addr` is the chain's native gas token — either the standard native
+/// sentinel (`0xEeee…`/zero address) or the chain's wrapped-native ERC-20.
+fn is_native_token(addr: &str, chain_id: u64) -> bool {
+    let a = addr.to_lowercase();
+    if a == "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        || a == "0x0000000000000000000000000000000000000000"
+    {
+        return true;
+    }
+    let wrapped = match chain_id {
+        1     => "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", // WETH
+        8453  => "0x4200000000000000000000000000000000000006", // WETH (Base)
+        42161 => "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH (Arbitrum)
+        10    => "0x4200000000000000000000000000000000000006", // WETH (Optimism)
+        137   => "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270", // WMATIC
+        56    => "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", // WBNB
+        _ => return false,
+    };
+    a == wrapped
+}
+
+/// Value the trade in the chain's native token (wei), if either side is native.
+/// `from_amount` is native wei when the input is native; `amount_out` is native wei
+/// when the output is native. A token→token swap has no native leg → `None`.
+fn native_notional_wei(req: &SimulateRequest, from_amount: u128, amount_out: u128) -> Option<u128> {
+    if is_native_token(&req.from_token, req.chain_id) {
+        Some(from_amount)
+    } else if is_native_token(&req.to_token, req.chain_id) {
+        Some(amount_out)
+    } else {
+        None
+    }
 }
 
 /// Returns a safe default response when simulation fails.

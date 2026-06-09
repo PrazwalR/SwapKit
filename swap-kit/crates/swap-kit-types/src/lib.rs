@@ -28,32 +28,6 @@ pub struct SimulateResponse {
     pub detected_bots: Vec<String>,
 }
 
-// ─── Quoting ────────────────────────────────────────────────────────────────
-
-/// Request for a multi-source quote.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QuoteRequest {
-    pub from_token: String,
-    pub to_token: String,
-    pub from_amount: String,
-    pub chain_id: u64,
-}
-
-/// A single quote from one protocol.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SingleQuote {
-    pub protocol: String,
-    pub amount_out: String,
-    pub gas_cost_wei: String,
-    pub price_impact_bps: u32,
-}
-
-/// Aggregated quote response.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct QuoteResponse {
-    pub quotes: Vec<SingleQuote>,
-}
-
 // ─── Hook Mining ────────────────────────────────────────────────────────────
 
 /// Request to mine a CREATE2 vanity address for a Uniswap V4 hook.

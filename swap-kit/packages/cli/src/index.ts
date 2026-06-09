@@ -16,7 +16,13 @@ dotenv.config();
 
 const program = new Command();
 const kit = new SwapKit({
-  oneInchApiKey: process.env.ONE_INCH_API_KEY || process.env.ONEINCH_API_KEY || "",
+  // Accept all common spellings — note `.env` ships the 1inch key as `1INCH_API_KEY`,
+  // which is not a valid JS identifier so it must be read via bracket access.
+  oneInchApiKey:
+    process.env.ONE_INCH_API_KEY ||
+    process.env.ONEINCH_API_KEY ||
+    process.env["1INCH_API_KEY"] ||
+    "",
 });
 
 // Standard Chain mapping

@@ -68,12 +68,14 @@ export interface OneInchRouteData {
   dstToken: string;   // Destination token address (for execution)
   fromAmount: string; // Input amount as string (for execution)
   secrets: Hex[]; // HTLC secrets for cross-chain
+  slippageBps?: number; // Slippage tolerance carried from quote → execution
 }
 
 export interface ParaswapRouteData {
   type: "paraswap";
   priceRoute: unknown; // Paraswap's opaque priceRoute object
   calldata: Hex;
+  slippageBps?: number; // Slippage tolerance carried from quote → execution
 }
 
 // ─── Uniswap V4 primitives ────────────────────────────────────────────────────

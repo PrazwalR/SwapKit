@@ -116,7 +116,7 @@ importers:
         specifier: ^8.0.1
         version: 8.2.0
       viem:
-        specifier: ^2.23.2
+        specifier: ^2.9.15
         version: 2.50.4(bufferutil@4.1.0)(typescript@5.9.2)(utf-8-validate@6.0.6)(zod@4.4.3)
     devDependencies:
       tsup:

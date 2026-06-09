@@ -104,7 +104,7 @@ export class ParaswapAdapter implements ISwapAdapter {
           priceRoute: priceData.priceRoute,
           calldata:   "0x" as Hex,
           slippageBps: intent.maxSlippageBps,
-        } as any,
+        },
         validUntil: Math.floor(Date.now() / 1000) + 60,
       };
     } catch (error: any) {
@@ -129,7 +129,7 @@ export class ParaswapAdapter implements ISwapAdapter {
       routeData.priceRoute,
       userAddress,
       quote.amountOut,
-      (routeData as any).slippageBps || 50
+      routeData.slippageBps || 50
     );
 
     // Get balance before

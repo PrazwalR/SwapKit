@@ -1,6 +1,6 @@
 {
   "name": "@swap-kit/cli",
-  "version": "0.1.11",
+  "version": "0.2.0",
   "description": "CLI for SwapKit — get DeFi quotes and simulate MEV from your terminal",
   "main": "./dist/index.js",
   "bin": {
@@ -36,7 +36,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.4.0",
-    "@swap-kit/core": "0.1.9",
+    "@swap-kit/core": "workspace:*",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
     "dotenv": "^16.4.5",
