@@ -163,7 +163,7 @@ mod tests {
     fn test_compute_create2_address() {
         // Known CREATE2 test vector
         let deployer = hex_decode("0000000000000000000000000000000000000000").unwrap();
-        let mut salt = [0u8; 32];
+        let salt = [0u8; 32];
         let init_code_hash =
             hex_decode("0000000000000000000000000000000000000000000000000000000000000000").unwrap();
 

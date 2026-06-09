@@ -30,63 +30,14 @@ export const UniversalRouterABI = [
   },
 ] as const;
 
-// ─── PoolManager ──────────────────────────────────────────────────────────────
-// https://docs.uniswap.org/contracts/v4/reference/core/PoolManager
+// ─── V4 Quoter ────────────────────────────────────────────────────────────────
+// Matches the DEPLOYED Uniswap V4 `Quoter` (IV4Quoter). Verified on mainnet
+// (0x52f0…1203): selector 0xaa9d21cb. The QuoteExactSingleParams struct has NO
+// `sqrtPriceLimitX96`, and the function returns two scalars
+// `(uint256 amountOut, uint256 gasEstimate)` — NOT arrays. Encoding the older
+// (sqrtPriceLimitX96 + array-output) shape reverts on-chain.
 
-export const PoolManagerABI = [
-  {
-    type: "function",
-    name: "swap",
-    inputs: [
-      {
-        name: "key",
-        type: "tuple",
-        internalType: "struct PoolKey",
-        components: [
-          { name: "currency0", type: "address", internalType: "Currency" },
-          { name: "currency1", type: "address", internalType: "Currency" },
-          { name: "fee", type: "uint24", internalType: "uint24" },
-          { name: "tickSpacing", type: "int24", internalType: "int24" },
-          { name: "hooks", type: "address", internalType: "contract IHooks" },
-        ],
-      },
-      {
-        name: "params",
-        type: "tuple",
-        internalType: "struct IPoolManager.SwapParams",
-        components: [
-          { name: "zeroForOne", type: "bool", internalType: "bool" },
-          { name: "amountSpecified", type: "int256", internalType: "int256" },
-          { name: "sqrtPriceLimitX96", type: "uint160", internalType: "uint160" },
-        ],
-      },
-      { name: "hookData", type: "bytes", internalType: "bytes" },
-    ],
-    outputs: [
-      { name: "swapDelta", type: "int256", internalType: "BalanceDelta" },
-    ],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "getSlot0",
-    inputs: [
-      { name: "id", type: "bytes32", internalType: "PoolId" },
-    ],
-    outputs: [
-      { name: "sqrtPriceX96", type: "uint160", internalType: "uint160" },
-      { name: "tick", type: "int24", internalType: "int24" },
-      { name: "protocolFee", type: "uint24", internalType: "uint24" },
-      { name: "lpFee", type: "uint24", internalType: "uint24" },
-    ],
-    stateMutability: "view",
-  },
-] as const;
-
-// ─── QuoterV2 ─────────────────────────────────────────────────────────────────
-// Used for off-chain swap simulation (reverts with result)
-
-export const QuoterV2ABI = [
+export const V4QuoterABI = [
   {
     type: "function",
     name: "quoteExactInputSingle",
@@ -94,7 +45,7 @@ export const QuoterV2ABI = [
       {
         name: "params",
         type: "tuple",
-        internalType: "struct IQuoter.QuoteExactSingleParams",
+        internalType: "struct IV4Quoter.QuoteExactSingleParams",
         components: [
           {
             name: "poolKey",
@@ -110,48 +61,15 @@ export const QuoterV2ABI = [
           },
           { name: "zeroForOne", type: "bool", internalType: "bool" },
           { name: "exactAmount", type: "uint128", internalType: "uint128" },
-          { name: "sqrtPriceLimitX96", type: "uint160", internalType: "uint160" },
           { name: "hookData", type: "bytes", internalType: "bytes" },
         ],
       },
     ],
     outputs: [
-      { name: "deltaAmounts", type: "int128[]", internalType: "int128[]" },
-      { name: "sqrtPriceX96After", type: "uint160", internalType: "uint160" },
-      { name: "initializedTicksCrossed", type: "uint32", internalType: "uint32" },
+      { name: "amountOut", type: "uint256", internalType: "uint256" },
+      { name: "gasEstimate", type: "uint256", internalType: "uint256" },
     ],
     stateMutability: "nonpayable",
-  },
-] as const;
-
-// ─── StateView ────────────────────────────────────────────────────────────────
-// Read-only view of pool state
-
-export const StateViewABI = [
-  {
-    type: "function",
-    name: "getSlot0",
-    inputs: [
-      { name: "poolId", type: "bytes32", internalType: "PoolId" },
-    ],
-    outputs: [
-      { name: "sqrtPriceX96", type: "uint160", internalType: "uint160" },
-      { name: "tick", type: "int24", internalType: "int24" },
-      { name: "protocolFee", type: "uint24", internalType: "uint24" },
-      { name: "lpFee", type: "uint24", internalType: "uint24" },
-    ],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getLiquidity",
-    inputs: [
-      { name: "poolId", type: "bytes32", internalType: "PoolId" },
-    ],
-    outputs: [
-      { name: "liquidity", type: "uint128", internalType: "uint128" },
-    ],
-    stateMutability: "view",
   },
 ] as const;
 

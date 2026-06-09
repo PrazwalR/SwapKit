@@ -1,6 +1,4 @@
 import {
-  createPublicClient,
-  http,
   encodeFunctionData,
   encodeAbiParameters,
   type Address,
@@ -8,10 +6,7 @@ import {
   type WalletClient,
   type PublicClient,
 } from "viem";
-import { mainnet, base, arbitrum } from "viem/chains";
-import { UniversalRouterABI } from "../abis/index.js";
-import { isNativeToken } from "../utils/token.js";
-import { ERC20ABI } from "../abis/index.js";
+import { UniversalRouterABI, ERC20ABI, V4QuoterABI } from "../abis/index.js";
 import type { ISwapAdapter } from "./base.js";
 import type {
   SwapIntent,
@@ -24,7 +19,7 @@ import { getPublicClient } from "../utils/chain.js";
 import { assertValidSlippageBps } from "../intent/parser.js";
 
 // Chain-specific addresses (Uniswap v4 deployments)
-const UNISWAP_V4_ADDRESSES: Record<number, {
+export const UNISWAP_V4_ADDRESSES: Record<number, {
   poolManager:     Address;
   universalRouter: Address;
   permit2:         Address;
@@ -56,52 +51,6 @@ const UNISWAP_V4_ADDRESSES: Record<number, {
 
 
 
-const CHAINS: Record<number, any> = {
-  1: mainnet,
-  8453: base,
-  42161: arbitrum,
-};
-
-// Quoter ABI (only the function we need)
-const QUOTER_ABI = [
-  {
-    name: "quoteExactInputSingle",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [
-      {
-        name: "params",
-        type: "tuple",
-        components: [
-          { name: "poolKey", type: "tuple", components: [
-            { name: "currency0",   type: "address" },
-            { name: "currency1",   type: "address" },
-            { name: "fee",         type: "uint24"  },
-            { name: "tickSpacing", type: "int24"   },
-            { name: "hooks",       type: "address" },
-          ]},
-          { name: "zeroForOne",       type: "bool"    },
-          { name: "exactAmount",      type: "uint128" },
-          { name: "sqrtPriceLimitX96", type: "uint160" },
-          { name: "hookData",         type: "bytes"   },
-        ],
-      },
-    ],
-    outputs: [
-      { name: "amountOut",      type: "int128[]" },
-      { name: "sqrtPriceX96After", type: "uint160[]" },
-      { name: "initializedTicksCrossed", type: "uint32" },
-    ],
-  },
-] as const;
-
-// V4 Router Actions
-const ACTIONS = {
-  SWAP_EXACT_IN_SINGLE: 0x06,
-  SETTLE_ALL:           0x0c,
-  TAKE_ALL:             0x0f,
-};
-
 export class UniswapV4Adapter implements ISwapAdapter {
   readonly protocol = "uniswap-v4" as const;
 
@@ -122,17 +71,21 @@ export class UniswapV4Adapter implements ISwapAdapter {
     let bestAmountOut = 0n;
     let bestPoolKey: PoolKey | null = null;
 
-    // Test multiple fee tiers to find the pool with the best liquidity (CRITICAL-3)
-    for (const fee of fees) {
-      const poolKey = this.buildPoolKey(intent.fromToken as Address, intent.toToken as Address, fee);
-      try {
+    // Quote every fee tier CONCURRENTLY and keep the best. Doing this sequentially
+    // makes a single quote up to 4× slower and can trip the quote-engine timeout on
+    // slower RPCs. Failed tiers (no pool / no liquidity) are simply ignored.
+    const tierQuotes = await Promise.allSettled(
+      fees.map(async (fee) => {
+        const poolKey = this.buildPoolKey(intent.fromToken as Address, intent.toToken as Address, fee);
         const amountOut = await this.getQuoteExact(client, poolKey, intent.fromAmount, addrs.quoter, intent.fromToken as Address);
-        if (amountOut > bestAmountOut) {
-          bestAmountOut = amountOut;
-          bestPoolKey = poolKey;
-        }
-      } catch {
-        // Pool doesn't exist or not enough liquidity, try next fee tier
+        return { poolKey, amountOut };
+      })
+    );
+
+    for (const tier of tierQuotes) {
+      if (tier.status === "fulfilled" && tier.value.amountOut > bestAmountOut) {
+        bestAmountOut = tier.value.amountOut;
+        bestPoolKey = tier.value.poolKey;
       }
     }
 
@@ -274,7 +227,7 @@ export class UniswapV4Adapter implements ISwapAdapter {
 
     const result = await client.simulateContract({
       address: quoterAddr,
-      abi: QUOTER_ABI,
+      abi: V4QuoterABI,
       functionName: "quoteExactInputSingle",
       args: [{
         poolKey: {
@@ -286,14 +239,13 @@ export class UniswapV4Adapter implements ISwapAdapter {
         },
         zeroForOne,
         exactAmount: amountIn,
-        sqrtPriceLimitX96: 0n,
         hookData: "0x",
       }],
     });
 
-    const amountOutArray = result.result[0] as bigint[];
-    const rawOut = amountOutArray[0];
-    return rawOut < 0n ? -rawOut : rawOut;
+    // IV4Quoter returns (uint256 amountOut, uint256 gasEstimate) — two scalars.
+    const amountOut = result.result[0] as bigint;
+    return amountOut;
   }
 
   private async getPriceImpact(

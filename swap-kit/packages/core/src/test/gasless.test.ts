@@ -368,12 +368,15 @@ console.log("══════════════════════�
 
 await test("Callback fires when user cannot afford gas", async () => {
   let callCount = 0;
-  let receivedCheck: GasCheck | null = null;
+  // Holder object: a `let` assigned only inside a closure gets narrowed by CFA to
+  // its `null` initializer, which `assert.ok` then collapses to `never`. A property
+  // on an object is not narrowed that way, so this keeps its declared type.
+  const received: { check: GasCheck | null } = { check: null };
 
   const engine = new ExecutionEngine([new SpyAdapter()], {
     gasless: {
       enabled: true,
-      onGaslessSwap: (check) => { callCount++; receivedCheck = check; },
+      onGaslessSwap: (check) => { callCount++; received.check = check; },
     },
   });
   const quote = mockQuote({ gasCostWei: 50000000000000n });
@@ -383,10 +386,10 @@ await test("Callback fires when user cannot afford gas", async () => {
   } catch { /* Expected */ }
 
   assert.strictEqual(callCount, 1, "Callback should fire exactly once");
-  assert.ok(receivedCheck, "Callback should receive a GasCheck object");
-  assert.strictEqual(receivedCheck!.canAffordGas, false);
-  assert.strictEqual(receivedCheck!.userBalanceWei, 0n);
-  assert.ok(receivedCheck!.shortfallWei > 0n);
+  assert.ok(received.check, "Callback should receive a GasCheck object");
+  assert.strictEqual(received.check.canAffordGas, false);
+  assert.strictEqual(received.check.userBalanceWei, 0n);
+  assert.ok(received.check.shortfallWei > 0n);
 });
 
 await test("Callback does NOT fire when user can afford gas", async () => {
@@ -508,12 +511,12 @@ await test("Gasless check with zero gas cost: always passes (free transaction)",
 });
 
 await test("GasCheck shortfallWei is mathematically correct", async () => {
-  let receivedCheck: GasCheck | null = null;
+  const received: { check: GasCheck | null } = { check: null };
 
   const engine = new ExecutionEngine([new SpyAdapter()], {
     gasless: {
       enabled: true,
-      onGaslessSwap: (check) => { receivedCheck = check; },
+      onGaslessSwap: (check) => { received.check = check; },
     },
   });
   // Gas cost 1000, margin = 1200, user has 500 → shortfall = 700
@@ -523,10 +526,10 @@ await test("GasCheck shortfallWei is mathematically correct", async () => {
     await engine.execute(mockIntent(), quote, mockWalletClient(), mockPublicClient(500n));
   } catch { /* Expected */ }
 
-  assert.ok(receivedCheck);
-  assert.strictEqual(receivedCheck!.userBalanceWei, 500n);
-  assert.strictEqual(receivedCheck!.estimatedGasCostWei, 1200n, "Should include 20% margin");
-  assert.strictEqual(receivedCheck!.shortfallWei, 700n, "1200 - 500 = 700");
+  assert.ok(received.check);
+  assert.strictEqual(received.check.userBalanceWei, 500n);
+  assert.strictEqual(received.check.estimatedGasCostWei, 1200n, "Should include 20% margin");
+  assert.strictEqual(received.check.shortfallWei, 700n, "1200 - 500 = 700");
 });
 
 // ═══════════════════════════════════════════════════════════════════════

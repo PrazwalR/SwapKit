@@ -5,3 +5,4 @@
 *.env
 *.log
 test-harness/
+.DS_Store

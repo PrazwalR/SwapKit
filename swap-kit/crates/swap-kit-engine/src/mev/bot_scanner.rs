@@ -33,9 +33,11 @@ const KNOWN_BOTS: &[&str] = &[
 pub struct BotScanResult {
     /// Bot addresses found active in recent blocks
     pub detected_bots: Vec<String>,
-    /// Number of blocks scanned
+    /// Number of blocks scanned (diagnostic; surfaced via logs and tests)
+    #[allow(dead_code)]
     pub blocks_scanned: u64,
-    /// Total transactions scanned
+    /// Total transactions scanned (diagnostic; surfaced via logs and tests)
+    #[allow(dead_code)]
     pub txs_scanned: u64,
 }
 

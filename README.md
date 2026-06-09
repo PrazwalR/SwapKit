@@ -11,7 +11,7 @@ Write 4 lines of code and let SwapKit find the best route, simulate MEV risk, an
 
 [![npm version](https://img.shields.io/npm/v/@swap-kit/core.svg)](https://www.npmjs.com/package/@swap-kit/core)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-111%2B%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-220%2B%20passed-brightgreen)]()
 [![GitHub Repo](https://img.shields.io/badge/GitHub-Repository-black?logo=github)](https://github.com/PrazwalR/SwapKit)
 
 [Getting Started](#-getting-started) •
@@ -305,13 +305,20 @@ Best Quote (Paraswap, 2,022.15 USDC)
     ▼
 Rust Engine POST /simulate
     │
-    ├─ Checks trade size against pool liquidity
-    ├─ Estimates sandwich attack profitability
+    ├─ Values the trade in the chain's NATIVE token (ETH/MATIC/…) wei
+    ├─ Compares extractable value vs the attacker's 2-tx gas cost (same unit)
+    ├─ Scans recent blocks for known sandwich-bot activity
     ├─ Calculates optimal slippage tolerance
     │
     ▼
 Returns: { sandwichRisk: "low", recommendedSlippage: 30bps }
 ```
+
+> **Why native-token valuation matters:** profitability is only meaningful when the
+> value a bot can extract and the gas it must pay are in the **same unit**. The engine
+> denominates both in native-token wei, so a large USDC-output trade is no longer
+> mis-scored as "no risk" just because USDC has 6 decimals. Token→token swaps with no
+> native leg are honestly reported as `unknown` rather than guessed.
 
 If the Rust engine detects **high MEV risk**, the SDK can automatically:
 - Lower the slippage tolerance to make sandwich attacks unprofitable
@@ -562,19 +569,22 @@ SwapKit resolves the highest priority RPC url logic automatically:
 
 ### Rust Engine API Endpoints
 
-The Rust engine has 4 endpoints. 
+The Rust engine has 3 endpoints. (Quoting lives entirely in the TypeScript SDK,
+which calls the real Paraswap/1inch APIs and the on-chain Uniswap V4 Quoter — the
+engine does not expose a `/quote` route.)
 
 1. **GET /health** — Returns `"ok"`. Used for monitoring.
 
-2. **POST /quote** — Returns heuristic estimates (**NOT real market data**). Uses percentage-based formulas (`from_amount × 98.5%` for 1inch, `98%` for Uniswap V4). This is a scaffolding for testing HTTP infra. Real quotes come from the TypeScript SDK.
-
-3. **POST /simulate** — MEV sandwich attack risk assessment:
+2. **POST /simulate** — MEV sandwich attack risk assessment:
    - Classifies risk as `none`, `low`, `medium`, `high`, or `unknown`
-   - Uses integer-based risk classification (no floating-point precision loss)
+   - Decides profitability in the chain's native token (wei), so the risk is correct
+     regardless of the output token's decimals; token→token swaps with no native
+     leg are reported as `unknown` rather than guessed
+   - Uses integer-based math (no floating-point precision loss)
    - Recommends optimal slippage
    - Request body: `{ from_token, to_token, from_amount, chain_id, protocol, amount_out, slippage_bps }`
 
-4. **POST /mine** — CREATE2 vanity address mining for Uniswap V4 hooks:
+3. **POST /mine** — CREATE2 vanity address mining for Uniswap V4 hooks:
    In Uniswap V4, the starting characters of a Hook's contract address dictate what permissions the Hook has (e.g., an address starting with `0x40...` vs `0x00...`). If you want "BeforeSwap" permissions, you must deploy to a specific prefix. This endpoint brute-forces that deployment salt for you.
    
    **How it works:**
@@ -618,6 +628,33 @@ The SDK has these modules:
 - **intent/parser.ts**: Resolves token symbols (ETH, USDC, etc.) to addresses per chain
 - **utils/token.ts**: On-chain decimal reads with known-token fallbacks (USDC=6, USDT=6, WBTC=8)
 - **utils/chain.ts**: RPC priority: env override > Alchemy > public fallback
+
+---
+
+## 📝 Changelog (v0.2.0)
+
+A second deep audit fixed three correctness bugs that made headline features silently
+misbehave, plus a round of cleanups. All fixes were verified against a mainnet fork
+(anvil) with real transactions and an exhaustive edge-case matrix.
+
+- 🔴 **Uniswap V4 quotes now work.** The Quoter ABI was wrong (extra `sqrtPriceLimitX96`
+  input, array outputs), so every quote reverted on-chain and Uniswap was silently
+  dropped from routing. Replaced with the real `IV4Quoter` ABI
+  (`(uint256 amountOut, uint256 gasEstimate)`), verified live on mainnet. Fee tiers are
+  now quoted concurrently.
+- 🔴 **MEV risk is no longer mis-scored.** The simulator compared output-token units
+  (e.g. 6-decimal USDC) against gas-in-wei, so large stablecoin-output trades always read
+  as "no risk". Profitability is now decided in native-token wei; token→token swaps with
+  no native leg return `unknown` instead of a false "none".
+- 🔴 **Uniswap V4 ERC-20 swaps now execute.** Added the missing second Permit2 approval
+  (`Permit2.approve(token, UniversalRouter)`); without it the router could not pull the
+  token and every ERC-20-input v4 swap reverted.
+- 🟠 Fixed the red `pnpm typecheck` (closure-narrowing `never` in the gasless tests).
+- 🟠 CLI now reads the `1INCH_API_KEY` env var spelling shipped in `.env`.
+- 🟡 Type-safe `slippageBps` on route data (removed `as any`); removed dead ABIs, dead
+  Rust quote types, and the unused `ACTIONS`/`CHAINS` constants; fixed compiler warnings.
+- ℹ️ Test suite expanded to 220+ checks: 34 Rust, 123 TS regression suites, 28 logic
+  edge cases, 38 live integration tests, plus fork-based end-to-end execution.
 
 ---
 
@@ -703,19 +740,32 @@ const sdk = createSwapKit({
 
 ## 📊 Test Results
 
-Our comprehensive test suite validates every component against live mainnet data:
+Every component is validated by deterministic suites, live integration tests, and
+end-to-end execution against a mainnet fork (anvil):
 
 ```
 ╔══════════════════════════════════════════════════════════════╗
 ║       SwapKit — Full Integration & Edge Case Test Suite     ║
 ╚══════════════════════════════════════════════════════════════╝
 
-  🦀 Rust Unit Tests ................... 14/14 ✅
-  🛡️ Rust Security / DoS tests .......... 25/25 ✅
-  📦 TypeScript E2E .................... 72/78 ✅ (6 are normal API behaviors)
+  🦀 Rust unit + security/DoS tests ...... 34/34 ✅
+  📦 TS regression suites ................ 123/123 ✅
+       (approvals · gasless · flashbots · recipient · MEV fail-open · slippage)
+  🧪 TS logic edge-case suite ............ 28/28 ✅
+  🌐 Live integration (Alchemy + 1inch) .. 38/38 ✅
+  ⛓️ Fork E2E execution + HTTP edge matrix . verified ✅
+       (Uniswap V4 ETH→USDC & USDC→WETH, 1inch ETH→USDC, /simulate · /mine · DoS)
 
-  TOTAL: 111+ tests PASSED — Ready for publication! 🎉
+  TOTAL: 220+ checks PASSED — Ready for publication! 🎉
 ```
+
+> Reproduce the fork tests:
+> ```bash
+> anvil --fork-url $RPC_ETHEREUM --port 8545 --silent &
+> cd swap-kit/packages/core
+> RPC_ETHEREUM=http://127.0.0.1:8545 npx tsx scripts/fork-verify.ts
+> RPC_ETHEREUM=http://127.0.0.1:8545 npx tsx scripts/fork-edge.ts
+> ```
 
 ---
 

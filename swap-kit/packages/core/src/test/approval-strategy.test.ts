@@ -28,7 +28,10 @@ import type { WalletClient, PublicClient } from "viem";
 
 // ─── Constants under test ──────────────────────────────────────────────────────
 const MAX_UINT256 = 2n ** 256n - 1n;
+const MAX_UINT160 = 2n ** 160n - 1n;
 const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
+// Uniswap v4 UniversalRouter on Ethereum mainnet (chain id 1).
+const UNIVERSAL_ROUTER = "0x66a9893cc07d91d95644aedd05d03f95e1dba8af";
 const PARASWAP_PROXY = "0x216B4B4Ba9F3e719726886d34a177484278Bfcae";
 const SIGNER = "0x1234567890abcdef1234567890abcdef12345678";
 const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
@@ -106,15 +109,26 @@ function mockWalletClient(): WalletClient {
  * Returns the captured { spender, amount } via the closure.
  */
 function makeCapturingPublicClient(allowance: bigint) {
-  const captured: { spender: string; amount: bigint }[] = [];
+  const captured: { spender: string; amount: bigint; via: "erc20" | "permit2" }[] = [];
   const client = {
     readContract: async (params: any) => {
-      if (params.functionName === "allowance") return allowance;
+      if (params.functionName === "allowance") {
+        // Permit2.allowance(owner, token, spender) returns a (amount, expiration, nonce)
+        // tuple; ERC-20 allowance(owner, spender) returns a scalar.
+        if (params.args.length === 3) return [allowance, 0, 0];
+        return allowance;
+      }
       return 0n;
     },
     simulateContract: async (params: any) => {
       if (params.functionName === "approve") {
-        captured.push({ spender: params.args[0], amount: params.args[1] });
+        if (params.args.length === 4) {
+          // Permit2.approve(token, spender, amount, expiration)
+          captured.push({ spender: params.args[1], amount: params.args[2], via: "permit2" });
+        } else {
+          // ERC-20 approve(spender, amount)
+          captured.push({ spender: params.args[0], amount: params.args[1], via: "erc20" });
+        }
       }
       return { request: { __captured: params.args } };
     },
@@ -203,18 +217,24 @@ async function main() {
   // ─── SECTION 4: Permit2 (Uniswap v4) path ──────────────────────────────
   console.log("\n──── SECTION 4: Permit2 path honors the strategy ────");
 
-  await test("uniswap-v4 default approves EXACT amount to Permit2", async () => {
+  await test("uniswap-v4 default approves EXACT amount: ERC20→Permit2 AND Permit2→UniversalRouter", async () => {
     const engine = new ExecutionEngine([new SpyAdapter("uniswap-v4")], { flashbotsEnabled: false });
     const { client, captured } = makeCapturingPublicClient(0n);
     const intent = { ...erc20Intent(), protocols: ["uniswap-v4"] as SwapProtocol[] };
     await engine.execute(intent, mockQuote("uniswap-v4"), mockWalletClient(), client);
 
-    assert.strictEqual(captured.length, 1);
-    assert.strictEqual(captured[0].spender.toLowerCase(), PERMIT2_ADDRESS.toLowerCase(), "v4 should approve to Permit2");
-    assert.strictEqual(captured[0].amount, SWAP_AMOUNT, "v4 should approve exact amount by default");
+    assert.strictEqual(captured.length, 2, "v4 needs BOTH the ERC20→Permit2 and Permit2→UniversalRouter approvals");
+    // Leg 1: ERC-20 approve(Permit2)
+    assert.strictEqual(captured[0].via, "erc20");
+    assert.strictEqual(captured[0].spender.toLowerCase(), PERMIT2_ADDRESS.toLowerCase(), "leg 1 spender should be Permit2");
+    assert.strictEqual(captured[0].amount, SWAP_AMOUNT, "leg 1 should approve exact amount by default");
+    // Leg 2: Permit2 approve(UniversalRouter)
+    assert.strictEqual(captured[1].via, "permit2");
+    assert.strictEqual(captured[1].spender.toLowerCase(), UNIVERSAL_ROUTER.toLowerCase(), "leg 2 spender should be the UniversalRouter");
+    assert.strictEqual(captured[1].amount, SWAP_AMOUNT, "leg 2 should approve exact amount by default");
   });
 
-  await test("uniswap-v4 infinite approves MAX_UINT256 to Permit2", async () => {
+  await test("uniswap-v4 infinite approves MAX_UINT256 (ERC20) and MAX_UINT160 (Permit2)", async () => {
     const engine = new ExecutionEngine([new SpyAdapter("uniswap-v4")], {
       flashbotsEnabled: false,
       approvalStrategy: "infinite",
@@ -222,8 +242,11 @@ async function main() {
     const { client, captured } = makeCapturingPublicClient(0n);
     const intent = { ...erc20Intent(), protocols: ["uniswap-v4"] as SwapProtocol[] };
     await engine.execute(intent, mockQuote("uniswap-v4"), mockWalletClient(), client);
-    assert.strictEqual(captured[0].amount, MAX_UINT256);
+    assert.strictEqual(captured.length, 2);
+    assert.strictEqual(captured[0].amount, MAX_UINT256, "ERC20→Permit2 infinite is uint256 max");
     assert.strictEqual(captured[0].spender.toLowerCase(), PERMIT2_ADDRESS.toLowerCase());
+    assert.strictEqual(captured[1].amount, MAX_UINT160, "Permit2→router infinite is uint160 max");
+    assert.strictEqual(captured[1].spender.toLowerCase(), UNIVERSAL_ROUTER.toLowerCase());
   });
 
   // ─── RESULTS ───────────────────────────────────────────────────────────
